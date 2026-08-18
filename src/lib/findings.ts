@@ -59,3 +59,13 @@ export function formatSourcePages(pages: number[]) {
   if (pages.length === 1) return `Page ${pages[0]}`;
   return `Pages ${pages[0]}–${pages.at(-1)}`;
 }
+
+export function mergeFindings(preferred: Finding[], fallback: Finding[]) {
+  const seen = new Set<string>();
+  return [...preferred, ...fallback].filter((finding) => {
+    const identity = finding.workItemId ?? finding.reportId;
+    if (seen.has(identity)) return false;
+    seen.add(identity);
+    return true;
+  });
+}

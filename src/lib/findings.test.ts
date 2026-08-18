@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import inspectionSeed from "../../seed-data/sample-property-inspection.json";
-import { countBySeverity, filterFindings, formatSourcePages, groupByCategory } from "./findings";
+import { countBySeverity, filterFindings, formatSourcePages, groupByCategory, mergeFindings } from "./findings";
 import type { Finding } from "./types";
 
 const findings = inspectionSeed.findings as Finding[];
@@ -23,5 +23,13 @@ describe("Sample Home inspection fixture", () => {
   it("formats single and multi-page evidence", () => {
     expect(formatSourcePages([17])).toBe("Page 17");
     expect(formatSourcePages([38, 39])).toBe("Pages 38–39");
+  });
+
+  it("deduplicates a newly created item when refreshed server data arrives", () => {
+    const persisted = findings[0];
+    const local = { ...persisted, workItemId: "work-1", isLocal: true };
+    const refreshed = { ...persisted, workItemId: "work-1" };
+
+    expect(mergeFindings([local], [refreshed])).toEqual([local]);
   });
 });

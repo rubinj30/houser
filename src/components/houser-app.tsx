@@ -41,6 +41,7 @@ import {
   filterFindings,
   formatSourcePages,
   groupByCategory,
+  mergeFindings,
   severityLabels,
 } from "@/lib/findings";
 import type { Finding, InspectionSeed, LocalWorkItem, ReviewActivity, ReviewStatus, Severity } from "@/lib/types";
@@ -78,7 +79,7 @@ export function HouserApp({ seed, propertyId, userEmail, initialReviewStatuses, 
   const [localItems, setLocalItems] = useState<LocalWorkItem[]>([]);
   const [reviewStatuses, setReviewStatuses] = useState(initialReviewStatuses);
   const [reviewActivities, setReviewActivities] = useState(initialReviewActivities);
-  const allFindings = useMemo(() => [...localItems, ...seed.findings], [localItems, seed.findings]);
+  const allFindings = useMemo(() => mergeFindings(localItems, seed.findings), [localItems, seed.findings]);
 
   const recordReviewUpdate = async (reportId: string, status: ReviewStatus, note: string) => {
     const item = allFindings.find((finding) => finding.reportId === reportId);
@@ -310,7 +311,7 @@ function WorkView({ findings, reviewStatuses, reviewActivities, onRecordReview }
       </div>
       <div className="scrollbar-none mt-4 flex gap-2 overflow-x-auto pb-1" aria-label="Severity filters">{(["all", "safety_hazard", "recommendation", "maintenance_item"] as const).map((value) => <button key={value} type="button" onClick={() => setSeverity(value)} className={`min-h-10 shrink-0 rounded-xl px-4 text-xs font-extrabold ${severity === value ? "bg-[var(--forest)] text-white" : "border border-black/7 bg-white/60 text-[var(--muted)]"}`}>{value === "all" ? `All ${findings.length}` : severityLabels[value]}</button>)}</div>
       <div className="mt-5 flex items-center justify-between"><p className="text-xs font-bold text-[var(--muted)]">Showing {filtered.length} items</p><span className="text-xs font-bold text-[var(--muted)]">Newest source first</span></div>
-      <div className="mt-2 grid gap-3 xl:grid-cols-2">{filtered.map((item) => <FindingCard key={`${item.reportId}-${item.title}`} item={item} status={reviewStatuses[item.reportId] ?? "needs_review"} menuOpen={menuItemId === item.reportId} onOpen={() => { setMenuItemId(null); setRequestedStatus(null); setSelectedItem(item); }} onToggleMenu={() => setMenuItemId((current) => current === item.reportId ? null : item.reportId)} onSetStatus={(status) => { setMenuItemId(null); setRequestedStatus(status); setSelectedItem(item); }} />)}</div>
+      <div className="mt-2 grid gap-3 xl:grid-cols-2">{filtered.map((item) => <FindingCard key={item.workItemId ?? item.reportId} item={item} status={reviewStatuses[item.reportId] ?? "needs_review"} menuOpen={menuItemId === item.reportId} onOpen={() => { setMenuItemId(null); setRequestedStatus(null); setSelectedItem(item); }} onToggleMenu={() => setMenuItemId((current) => current === item.reportId ? null : item.reportId)} onSetStatus={(status) => { setMenuItemId(null); setRequestedStatus(status); setSelectedItem(item); }} />)}</div>
       {filtered.length === 0 ? <div className="mt-8 rounded-[24px] border border-dashed border-black/15 p-10 text-center"><Search className="mx-auto size-7 text-[var(--muted)]"/><h2 className="font-display mt-3 text-lg font-extrabold">No matching work</h2><p className="mt-1 text-sm text-[var(--muted)]">Try another search or clear a filter.</p></div> : null}
     </div>
     {selectedItem ? <FindingReviewDialog key={`${selectedItem.reportId}-${requestedStatus ?? "details"}`} item={selectedItem} status={reviewStatuses[selectedItem.reportId] ?? "needs_review"} activities={reviewActivities.filter((activity) => activity.reportId === selectedItem.reportId)} initialStatus={requestedStatus} onClose={() => { setSelectedItem(null); setRequestedStatus(null); }} onRecordReview={(status, note) => onRecordReview(selectedItem.reportId, status, note)} /> : null}
