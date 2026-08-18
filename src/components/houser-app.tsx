@@ -47,6 +47,12 @@ import {
 import type { Finding, InspectionSeed, LocalWorkItem, ReviewActivity, ReviewStatus, Severity } from "@/lib/types";
 
 type View = "home" | "work" | "timeline" | "assets";
+type WorkIntent = {
+  category: string;
+  severity: Severity | "all";
+  selectedReportId: string | null;
+  revision: number;
+};
 const reviewStatusLabels: Record<ReviewStatus, string> = {
   needs_review: "Needs review",
   open: "Still needs work",
@@ -79,6 +85,7 @@ export function HouserApp({ seed, propertyId, userEmail, initialReviewStatuses, 
   const [localItems, setLocalItems] = useState<LocalWorkItem[]>([]);
   const [reviewStatuses, setReviewStatuses] = useState(initialReviewStatuses);
   const [reviewActivities, setReviewActivities] = useState(initialReviewActivities);
+  const [workIntent, setWorkIntent] = useState<WorkIntent>({ category: "all", severity: "all", selectedReportId: null, revision: 0 });
   const allFindings = useMemo(() => mergeFindings(localItems, seed.findings), [localItems, seed.findings]);
 
   const recordReviewUpdate = async (reportId: string, status: ReviewStatus, note: string) => {
@@ -90,7 +97,21 @@ export function HouserApp({ seed, propertyId, userEmail, initialReviewStatuses, 
   };
 
   const changeView = (view: View) => {
+    if (view === "work") {
+      setWorkIntent((current) => ({ category: "all", severity: "all", selectedReportId: null, revision: current.revision + 1 }));
+    }
     setActiveView(view);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const openWork = (intent: Partial<Omit<WorkIntent, "revision">> = {}) => {
+    setWorkIntent((current) => ({
+      category: intent.category ?? "all",
+      severity: intent.severity ?? "all",
+      selectedReportId: intent.selectedReportId ?? null,
+      revision: current.revision + 1,
+    }));
+    setActiveView("work");
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -103,9 +124,9 @@ export function HouserApp({ seed, propertyId, userEmail, initialReviewStatuses, 
           {property === "rental" ? (
             <EmptyRental onSwitch={() => setProperty("ivy")} />
           ) : activeView === "home" ? (
-            <HomeView seed={seed} findings={allFindings} onChangeView={changeView} />
+            <HomeView seed={seed} findings={allFindings} onOpenWork={openWork} />
           ) : activeView === "work" ? (
-            <WorkView findings={allFindings} reviewStatuses={reviewStatuses} reviewActivities={reviewActivities} onRecordReview={recordReviewUpdate} />
+            <WorkView key={workIntent.revision} findings={allFindings} initialCategory={workIntent.category} initialSeverity={workIntent.severity} initialSelectedReportId={workIntent.selectedReportId} reviewStatuses={reviewStatuses} reviewActivities={reviewActivities} onRecordReview={recordReviewUpdate} />
           ) : activeView === "timeline" ? (
             <TimelineView findings={allFindings} reviewStatuses={reviewStatuses} reviewActivities={reviewActivities} onRecordReview={recordReviewUpdate} />
           ) : (
@@ -204,7 +225,7 @@ function PropertySelect({ property, setProperty, className, full = false }: { pr
   );
 }
 
-function HomeView({ seed, findings, onChangeView }: { seed: InspectionSeed; findings: Finding[]; onChangeView: (view: View) => void }) {
+function HomeView({ seed, findings, onOpenWork }: { seed: InspectionSeed; findings: Finding[]; onOpenWork: (intent?: Partial<Omit<WorkIntent, "revision">>) => void }) {
   const counts = countBySeverity(findings);
   const categories = groupByCategory(findings).slice(0, 6);
   const safetyItems = findings.filter((item) => item.severity === "safety_hazard").slice(0, 4);
@@ -217,7 +238,7 @@ function HomeView({ seed, findings, onChangeView }: { seed: InspectionSeed; find
           <h1 className="font-display text-[clamp(2rem,5vw,3.5rem)] font-extrabold leading-[1.02] tracking-[-0.055em]">Your house, at a glance.</h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-[var(--muted)] sm:text-base">Review the 2024 inspection, capture what has changed, and turn the remaining items into a clear plan.</p>
         </div>
-        <button type="button" onClick={() => onChangeView("work")} className="group flex min-h-11 items-center gap-2 self-start rounded-xl border border-black/8 bg-white px-4 text-sm font-bold surface-shadow sm:self-auto">View all work <ArrowRight className="size-4 transition group-hover:translate-x-0.5" /></button>
+        <button type="button" onClick={() => onOpenWork()} className="group flex min-h-11 items-center gap-2 self-start rounded-xl border border-black/8 bg-white px-4 text-sm font-bold surface-shadow sm:self-auto">View all work <ArrowRight className="size-4 transition group-hover:translate-x-0.5" /></button>
       </section>
 
       <section className="mt-7 grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Property summary">
@@ -236,7 +257,7 @@ function HomeView({ seed, findings, onChangeView }: { seed: InspectionSeed; find
                 <h2 className="font-display mt-4 max-w-lg text-2xl font-extrabold leading-tight tracking-[-0.04em] sm:text-3xl">Turn the Sample Home report into your working plan.</h2>
                 <p className="mt-3 max-w-xl text-sm leading-6 text-white/65">Every finding keeps its page reference. Review what is still relevant, attach report captures, and record anything already completed.</p>
               </div>
-              <button type="button" onClick={() => onChangeView("work")} className="mt-6 flex min-h-11 w-fit items-center gap-2 rounded-xl bg-[var(--lime)] px-4 text-sm font-extrabold text-[var(--forest-dark)] transition hover:brightness-105">Start review <ArrowRight className="size-4" /></button>
+              <button type="button" onClick={() => onOpenWork()} className="mt-6 flex min-h-11 w-fit items-center gap-2 rounded-xl bg-[var(--lime)] px-4 text-sm font-extrabold text-[var(--forest-dark)] transition hover:brightness-105">Start review <ArrowRight className="size-4" /></button>
             </div>
             <ReportIllustration />
           </div>
@@ -252,12 +273,12 @@ function HomeView({ seed, findings, onChangeView }: { seed: InspectionSeed; find
 
       <section className="mt-8 grid gap-7 xl:grid-cols-[1fr_1.1fr]">
         <div>
-          <SectionHeading eyebrow="Organize by system" title="Where the work lives" action="All categories" onAction={() => onChangeView("work")} />
-          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">{categories.map((category) => <CategoryCard key={category.category} {...category} />)}</div>
+          <SectionHeading eyebrow="Organize by system" title="Where the work lives" action="All categories" onAction={() => onOpenWork()} />
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">{categories.map((category) => <CategoryCard key={category.category} {...category} onOpen={() => onOpenWork({ category: category.category })} />)}</div>
         </div>
         <div>
-          <SectionHeading eyebrow="Review first" title="Safety findings" action="See all 8" onAction={() => onChangeView("work")} />
-          <div className="mt-4 overflow-hidden rounded-[24px] border border-black/6 bg-[var(--paper)] surface-shadow">{safetyItems.map((item, index) => <CompactFinding key={item.reportId} item={item} last={index === safetyItems.length - 1} />)}</div>
+          <SectionHeading eyebrow="Review first" title="Safety findings" action={`See all ${counts.safety_hazard}`} onAction={() => onOpenWork({ severity: "safety_hazard" })} />
+          <div className="mt-4 overflow-hidden rounded-[24px] border border-black/6 bg-[var(--paper)] surface-shadow">{safetyItems.map((item, index) => <CompactFinding key={item.reportId} item={item} last={index === safetyItems.length - 1} onOpen={() => onOpenWork({ severity: "safety_hazard", selectedReportId: item.reportId })} />)}</div>
         </div>
       </section>
     </div>
@@ -282,20 +303,20 @@ function SectionHeading({ eyebrow, title, action, onAction }: { eyebrow: string;
   return <div className="flex items-end justify-between gap-4"><div><p className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-[var(--forest)]">{eyebrow}</p><h2 className="font-display mt-1 text-xl font-extrabold tracking-[-0.035em] sm:text-2xl">{title}</h2></div><button type="button" onClick={onAction} className="text-xs font-extrabold text-[var(--forest)] hover:underline">{action}</button></div>;
 }
 
-function CategoryCard({ category, count, urgent }: { category: string; count: number; urgent: number }) {
+function CategoryCard({ category, count, urgent, onOpen }: { category: string; count: number; urgent: number; onOpen: () => void }) {
   const Icon = iconByCategory[category] ?? Wrench;
-  return <article className="group rounded-[20px] border border-black/6 bg-[var(--paper)] p-4 transition hover:-translate-y-0.5 hover:border-[var(--forest)]/20 surface-shadow"><div className="flex items-start justify-between"><div className="grid size-9 place-items-center rounded-xl bg-[var(--mint)] text-[var(--forest)]"><Icon className="size-[18px]" /></div>{urgent ? <span className="rounded-full bg-[#f8ddd7] px-2 py-1 text-[10px] font-extrabold text-[#8c3328]">{urgent} urgent</span> : null}</div><h3 className="mt-4 min-h-9 text-sm font-extrabold leading-tight">{category}</h3><p className="mt-2 text-xs font-bold text-[var(--muted)]">{count} {count === 1 ? "item" : "items"}</p></article>;
+  return <button type="button" onClick={onOpen} className="group w-full rounded-[20px] border border-black/6 bg-[var(--paper)] p-4 text-left transition hover:-translate-y-0.5 hover:border-[var(--forest)]/20 surface-shadow" aria-label={`View ${category} work`}><div className="flex items-start justify-between"><div className="grid size-9 place-items-center rounded-xl bg-[var(--mint)] text-[var(--forest)]"><Icon className="size-[18px]" /></div>{urgent ? <span className="rounded-full bg-[#f8ddd7] px-2 py-1 text-[10px] font-extrabold text-[#8c3328]">{urgent} urgent</span> : null}</div><h3 className="mt-4 min-h-9 text-sm font-extrabold leading-tight group-hover:text-[var(--forest)]">{category}</h3><p className="mt-2 flex items-center justify-between text-xs font-bold text-[var(--muted)]"><span>{count} {count === 1 ? "item" : "items"}</span><ArrowRight className="size-4 transition group-hover:translate-x-0.5" /></p></button>;
 }
 
-function CompactFinding({ item, last }: { item: Finding; last: boolean }) {
-  return <article className={`flex gap-3 p-4 sm:p-5 ${last ? "" : "border-b border-black/6"}`}><div className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-xl bg-[#f8ddd7] text-[#a33e32]"><AlertTriangle className="size-[17px]" /></div><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-2"><h3 className="text-sm font-extrabold leading-5">{item.title}</h3><MoreHorizontal className="size-4 shrink-0 text-[var(--muted)]" /></div><p className="mt-1 truncate text-xs text-[var(--muted)]">{item.location}</p><div className="mt-2 flex items-center gap-2 text-[10px] font-extrabold uppercase tracking-[0.08em] text-[var(--muted)]"><Camera className="size-3" /> {formatSourcePages(item.sourcePages)}</div></div></article>;
+function CompactFinding({ item, last, onOpen }: { item: Finding; last: boolean; onOpen: () => void }) {
+  return <button type="button" onClick={onOpen} className={`group flex w-full gap-3 p-4 text-left transition hover:bg-[var(--mint)]/35 sm:p-5 ${last ? "" : "border-b border-black/6"}`} aria-label={`Open ${item.title}`}><div className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-xl bg-[#f8ddd7] text-[#a33e32]"><AlertTriangle className="size-[17px]" /></div><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-2"><h3 className="text-sm font-extrabold leading-5 group-hover:text-[var(--forest)]">{item.title}</h3><ArrowRight className="size-4 shrink-0 text-[var(--muted)] transition group-hover:translate-x-0.5 group-hover:text-[var(--forest)]" /></div><p className="mt-1 truncate text-xs text-[var(--muted)]">{item.location}</p><div className="mt-2 flex items-center gap-2 text-[10px] font-extrabold uppercase tracking-[0.08em] text-[var(--muted)]"><Camera className="size-3" /> {formatSourcePages(item.sourcePages)}</div></div></button>;
 }
 
-function WorkView({ findings, reviewStatuses, reviewActivities, onRecordReview }: { findings: Finding[]; reviewStatuses: Record<string, ReviewStatus>; reviewActivities: ReviewActivity[]; onRecordReview: (reportId: string, status: ReviewStatus, note: string) => Promise<void> }) {
+function WorkView({ findings, initialCategory, initialSeverity, initialSelectedReportId, reviewStatuses, reviewActivities, onRecordReview }: { findings: Finding[]; initialCategory: string; initialSeverity: Severity | "all"; initialSelectedReportId: string | null; reviewStatuses: Record<string, ReviewStatus>; reviewActivities: ReviewActivity[]; onRecordReview: (reportId: string, status: ReviewStatus, note: string) => Promise<void> }) {
   const [query, setQuery] = useState("");
-  const [severity, setSeverity] = useState<Severity | "all">("all");
-  const [category, setCategory] = useState("all");
-  const [selectedItem, setSelectedItem] = useState<Finding | null>(null);
+  const [severity, setSeverity] = useState<Severity | "all">(initialSeverity);
+  const [category, setCategory] = useState(initialCategory);
+  const [selectedItem, setSelectedItem] = useState<Finding | null>(() => findings.find((item) => item.reportId === initialSelectedReportId) ?? null);
   const [requestedStatus, setRequestedStatus] = useState<ReviewStatus | null>(null);
   const [menuItemId, setMenuItemId] = useState<string | null>(null);
   const categories = useMemo(() => [...new Set(findings.map((item) => item.category))].sort(), [findings]);
