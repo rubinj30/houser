@@ -214,7 +214,7 @@ Service records are historical facts and should not be casually edited or delete
 
 - `id`, `property_id`
 - Optional links to asset, work item, service record, or vendor via `document_links`
-- `document_type`: inspection, invoice, work_order, receipt, warranty, manual, permit, photo, other
+- `document_type`: inspection, quote, invoice, work_order, receipt, warranty, manual, permit, photo, other
 - `original_filename`, `mime_type`, `byte_size`, `storage_key`
 - `sha256` for duplicate detection and integrity
 - `document_date`

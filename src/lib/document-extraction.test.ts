@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { zodTextFormat } from "openai/helpers/zod";
 import fixture from "../../seed-data/sample-property-example-hvac-vendor-proposal.json";
-import { normalizedDocumentSchema } from "./document-extraction";
+import { buildDocumentExtractionPrompt, normalizedDocumentSchema } from "./document-extraction";
 
 describe("normalized document extraction", () => {
   it("validates the Example HVAC Vendor proposal fixture", () => {
@@ -22,5 +23,15 @@ describe("normalized document extraction", () => {
     expect(parsed.review.required).toBe(true);
     expect(parsed.review.unresolvedFields).toContain("financials.subtotal");
     expect(parsed.document.acceptanceStatus).toBe("proposed");
+  });
+
+  it("gives quotes and invoices different extraction semantics", () => {
+    const common = { originalFilename: "source.pdf", privateObjectKey: "property/document/original.pdf", sha256: "a".repeat(64) };
+    expect(buildDocumentExtractionPrompt({ ...common, documentType: "quote" })).toContain("proposed, not completed");
+    expect(buildDocumentExtractionPrompt({ ...common, documentType: "invoice" })).toContain("performed or billed");
+  });
+
+  it("can be converted to an OpenAI structured-output format", () => {
+    expect(() => zodTextFormat(normalizedDocumentSchema, "normalized_document")).not.toThrow();
   });
 });

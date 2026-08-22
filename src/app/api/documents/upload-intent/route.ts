@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 
 const requestSchema = z.object({
   propertyId: z.string().uuid(),
+  documentType: z.enum(["inspection", "quote", "invoice"]),
   filename: z.string().min(1).max(240),
   mimeType: z.literal("application/pdf"),
   byteSize: z.number().int().positive().max(52_428_800),
@@ -17,7 +18,7 @@ export async function POST(request: Request) {
   const supabase = await createClient();
   const { data: auth } = await supabase.auth.getClaims();
   const userId = typeof auth?.claims?.sub === "string" ? auth.claims.sub : null;
-  if (!userId) return NextResponse.json({ error: "Sign in to upload an inspection." }, { status: 401 });
+  if (!userId) return NextResponse.json({ error: "Sign in to upload a document." }, { status: 401 });
 
   const { data: property } = await supabase.from("properties").select("id").eq("id", parsed.data.propertyId).maybeSingle();
   if (!property) return NextResponse.json({ error: "Property not found." }, { status: 404 });
@@ -28,7 +29,7 @@ export async function POST(request: Request) {
   const { error: insertError } = await supabase.from("documents").insert({
     id: documentId,
     property_id: property.id,
-    document_type: "inspection",
+    document_type: parsed.data.documentType,
     original_filename: parsed.data.filename,
     mime_type: parsed.data.mimeType,
     byte_size: parsed.data.byteSize,
