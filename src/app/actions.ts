@@ -96,7 +96,7 @@ export async function requestMagicLinkAction(input: { email: string; origin?: st
     throw new Error("Houser sign-in is not configured yet.");
   }
   if (allowedEmails.length > 0 && !allowedEmails.includes(normalizedEmail)) {
-    return { sent: true };
+    return { sent: true as const };
   }
 
   const requestHeaders = await headers();
@@ -112,8 +112,16 @@ export async function requestMagicLinkAction(input: { email: string; origin?: st
       shouldCreateUser: true,
     },
   });
-  if (error) throw new Error(error.message);
-  return { sent: true };
+  if (error) {
+    const rateLimited = error.message.toLowerCase().includes("rate limit");
+    return {
+      sent: false as const,
+      error: rateLimited
+        ? "Too many sign-in emails were requested. Please wait and try again later."
+        : "The sign-in link could not be sent. Please try again.",
+    };
+  }
+  return { sent: true as const };
 }
 
 export async function bootstrapHouserAction() {

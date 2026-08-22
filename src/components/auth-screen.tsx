@@ -17,7 +17,11 @@ export function AuthScreen({ authError = false }: { authError?: boolean }) {
     setIsSending(true);
     setError("");
     try {
-      await requestMagicLinkAction({ email: normalizedEmail, origin: window.location.origin });
+      const result = await requestMagicLinkAction({ email: normalizedEmail, origin: window.location.origin });
+      if (!result.sent) {
+        setError(result.error);
+        return;
+      }
       setSentTo(normalizedEmail);
     } catch (signInError) {
       setError(signInError instanceof Error ? signInError.message : "The sign-in link could not be sent.");
