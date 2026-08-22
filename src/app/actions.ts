@@ -26,6 +26,35 @@ const manualWorkSchema = z.object({
 const magicLinkSchema = z.object({ email: z.email() });
 const evidenceRequestSchema = z.object({ workItemId: z.uuid() });
 
+function requestSiteUrl(requestHeaders: Headers) {
+  const origin = requestHeaders.get("origin");
+  if (origin) {
+    try {
+      return new URL(origin).origin;
+    } catch {
+      // Fall through to the forwarded host supplied by the deployment proxy.
+    }
+  }
+
+  const host = (requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host"))
+    ?.split(",")[0]
+    .trim();
+  if (!host) return null;
+
+  const forwardedProtocol = requestHeaders.get("x-forwarded-proto")?.split(",")[0].trim();
+  const protocol = forwardedProtocol === "http" || forwardedProtocol === "https"
+    ? forwardedProtocol
+    : host.startsWith("localhost")
+      ? "http"
+      : "https";
+
+  try {
+    return new URL(`${protocol}://${host}`).origin;
+  } catch {
+    return null;
+  }
+}
+
 const categoryAliases: Record<string, string> = {
   HVAC: "HVAC and Ventilation",
   Plumbing: "Plumbing and Water",
@@ -71,11 +100,9 @@ export async function requestMagicLinkAction(input: { email: string }) {
   }
 
   const requestHeaders = await headers();
-  const requestOrigin = requestHeaders.get("origin");
+  const requestOrigin = requestSiteUrl(requestHeaders);
   const configuredUrl = process.env.NEXT_PUBLIC_SITE_URL;
-  const siteUrl = process.env.VERCEL_ENV === "preview"
-    ? requestOrigin ?? configuredUrl ?? "http://localhost:3000"
-    : configuredUrl ?? requestOrigin ?? "http://localhost:3000";
+  const siteUrl = requestOrigin ?? configuredUrl ?? "http://localhost:3000";
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithOtp({
     email: normalizedEmail,
