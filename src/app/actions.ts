@@ -73,7 +73,9 @@ export async function requestMagicLinkAction(input: { email: string }) {
   const requestHeaders = await headers();
   const requestOrigin = requestHeaders.get("origin");
   const configuredUrl = process.env.NEXT_PUBLIC_SITE_URL;
-  const siteUrl = configuredUrl ?? requestOrigin ?? "http://localhost:3000";
+  const siteUrl = process.env.VERCEL_ENV === "preview"
+    ? requestOrigin ?? configuredUrl ?? "http://localhost:3000"
+    : configuredUrl ?? requestOrigin ?? "http://localhost:3000";
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithOtp({
     email: normalizedEmail,
