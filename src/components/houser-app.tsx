@@ -36,7 +36,7 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { completeWorkItemAction, createManualWorkItemAction, getInspectionEvidenceAction, recordReviewUpdateAction, signOutAction } from "@/app/actions";
 import { createClient as createBrowserClient } from "@/lib/supabase/client";
 import type { InspectionExtraction } from "@/lib/inspection-extraction";
@@ -49,6 +49,7 @@ import {
   severityLabels,
 } from "@/lib/findings";
 import type { Finding, InspectionEvidence, InspectionSeed, LocalWorkItem, ReviewActivity, ReviewStatus, ServiceRecord, Severity, WorkCompletionInput } from "@/lib/types";
+import { isClosedReviewStatus } from "@/lib/work-status";
 
 type View = "home" | "work" | "timeline" | "assets";
 type WorkIntent = {
@@ -94,6 +95,10 @@ export function HouserApp({ seed, propertyId, userEmail, initialReviewStatuses, 
   const [serviceRecords, setServiceRecords] = useState(initialServiceRecords);
   const [workIntent, setWorkIntent] = useState<WorkIntent>({ category: "all", severity: "all", selectedReportId: null, revision: 0 });
   const allFindings = useMemo(() => mergeFindings(localItems, seed.findings), [localItems, seed.findings]);
+  const currentFindings = useMemo(
+    () => allFindings.filter((finding) => !isClosedReviewStatus(reviewStatuses[finding.reportId])),
+    [allFindings, reviewStatuses],
+  );
 
   const recordReviewUpdate = async (reportId: string, status: ReviewStatus, note: string) => {
     const item = allFindings.find((finding) => finding.reportId === reportId);
@@ -134,18 +139,18 @@ export function HouserApp({ seed, propertyId, userEmail, initialReviewStatuses, 
 
   return (
     <div className="min-h-dvh lg:grid lg:grid-cols-[248px_1fr]">
-      <DesktopSidebar activeView={activeView} workCount={allFindings.length} userEmail={userEmail} onChangeView={changeView} />
+      <DesktopSidebar activeView={activeView} workCount={currentFindings.length} userEmail={userEmail} onChangeView={changeView} />
       <div className="min-w-0 pb-24 lg:pb-0">
         <TopBar property={property} userEmail={userEmail} setProperty={setProperty} onAdd={() => setIsAdding(true)} onUpload={() => setIsUploadingInspection(true)} />
         <main className="mx-auto w-full max-w-[1500px] px-4 pb-10 pt-5 sm:px-6 lg:px-10 lg:pb-14 lg:pt-8">
           {property === "rental" ? (
             <EmptyRental onSwitch={() => setProperty("ivy")} />
           ) : activeView === "home" ? (
-            <HomeView seed={seed} findings={allFindings} onOpenWork={openWork} onUpload={() => setIsUploadingInspection(true)} />
+            <HomeView seed={seed} findings={currentFindings} onOpenWork={openWork} onUpload={() => setIsUploadingInspection(true)} />
           ) : activeView === "work" ? (
             <WorkView key={workIntent.revision} findings={allFindings} initialCategory={workIntent.category} initialSeverity={workIntent.severity} initialSelectedReportId={workIntent.selectedReportId} reviewStatuses={reviewStatuses} reviewActivities={reviewActivities} serviceRecords={serviceRecords} onRecordReview={recordReviewUpdate} onCompleteWork={completeWorkItem} />
           ) : activeView === "timeline" ? (
-            <TimelineView findings={allFindings} reviewStatuses={reviewStatuses} reviewActivities={reviewActivities} serviceRecords={serviceRecords} onRecordReview={recordReviewUpdate} onCompleteWork={completeWorkItem} />
+            <TimelineView findings={currentFindings} reviewStatuses={reviewStatuses} reviewActivities={reviewActivities} serviceRecords={serviceRecords} onRecordReview={recordReviewUpdate} onCompleteWork={completeWorkItem} />
           ) : (
             <AssetsView seed={seed} />
           )}
@@ -332,27 +337,45 @@ function CompactFinding({ item, last, onOpen }: { item: Finding; last: boolean; 
 }
 
 function WorkView({ findings, initialCategory, initialSeverity, initialSelectedReportId, reviewStatuses, reviewActivities, serviceRecords, onRecordReview, onCompleteWork }: { findings: Finding[]; initialCategory: string; initialSeverity: Severity | "all"; initialSelectedReportId: string | null; reviewStatuses: Record<string, ReviewStatus>; reviewActivities: ReviewActivity[]; serviceRecords: ServiceRecord[]; onRecordReview: (reportId: string, status: ReviewStatus, note: string) => Promise<void>; onCompleteWork: (reportId: string, details: CompletionDetails) => Promise<unknown> }) {
+  const [scope, setScope] = useState<"current" | "history">("current");
   const [query, setQuery] = useState("");
   const [severity, setSeverity] = useState<Severity | "all">(initialSeverity);
   const [category, setCategory] = useState(initialCategory);
   const [selectedItem, setSelectedItem] = useState<Finding | null>(() => findings.find((item) => item.reportId === initialSelectedReportId) ?? null);
   const [requestedStatus, setRequestedStatus] = useState<ReviewStatus | null>(null);
   const [menuItemId, setMenuItemId] = useState<string | null>(null);
-  const categories = useMemo(() => [...new Set(findings.map((item) => item.category))].sort(), [findings]);
-  const filtered = useMemo(() => filterFindings(findings, { query, severity, category }), [findings, query, severity, category]);
+  const currentCount = useMemo(() => findings.filter((item) => !isClosedReviewStatus(reviewStatuses[item.reportId])).length, [findings, reviewStatuses]);
+  const historyCount = findings.length - currentCount;
+  const scopedFindings = useMemo(
+    () => findings.filter((item) => scope === "history" ? isClosedReviewStatus(reviewStatuses[item.reportId]) : !isClosedReviewStatus(reviewStatuses[item.reportId])),
+    [findings, reviewStatuses, scope],
+  );
+  const categories = useMemo(() => [...new Set(scopedFindings.map((item) => item.category))].sort(), [scopedFindings]);
+  const filtered = useMemo(() => filterFindings(scopedFindings, { query, severity, category }), [scopedFindings, query, severity, category]);
+
+  const changeScope = (nextScope: "current" | "history") => {
+    setScope(nextScope);
+    setCategory("all");
+    setSeverity("all");
+    setMenuItemId(null);
+  };
 
   return (
     <>
     <div className="enter">
-      <PageHeading eyebrow="Inspection inbox" title="Work to review" description="Confirm what is still relevant before these findings become active work." />
+      <PageHeading eyebrow={scope === "current" ? "Inspection inbox" : "Work history"} title={scope === "current" ? "Work to review" : "Completed and dismissed"} description={scope === "current" ? "Confirm what is still relevant before these findings become active work." : "Closed items stay available here for service history and future reference."} />
+      <div className="mt-6 inline-flex w-full rounded-2xl border border-black/8 bg-white/55 p-1 sm:w-auto" aria-label="Work status view">
+        <button type="button" aria-pressed={scope === "current"} onClick={() => changeScope("current")} className={`min-h-11 flex-1 rounded-xl px-4 text-xs font-extrabold transition sm:flex-none ${scope === "current" ? "bg-[var(--forest)] text-white shadow-sm" : "text-[var(--muted)] hover:bg-white"}`}>Current <span className="ml-1 opacity-70">{currentCount}</span></button>
+        <button type="button" aria-pressed={scope === "history"} onClick={() => changeScope("history")} className={`min-h-11 flex-1 rounded-xl px-4 text-xs font-extrabold transition sm:flex-none ${scope === "history" ? "bg-[var(--forest)] text-white shadow-sm" : "text-[var(--muted)] hover:bg-white"}`}>History <span className="ml-1 opacity-70">{historyCount}</span></button>
+      </div>
       <div className="mt-6 flex flex-col gap-3 lg:flex-row lg:items-center">
         <label className="relative flex-1"><span className="sr-only">Search work</span><Search className="pointer-events-none absolute left-4 top-1/2 size-[18px] -translate-y-1/2 text-[var(--muted)]"/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search work, areas, or actions" className="h-12 w-full rounded-2xl border border-black/8 bg-[var(--paper)] pl-11 pr-4 text-sm outline-none surface-shadow" /></label>
         <label className="relative"><span className="sr-only">Filter by category</span><select value={category} onChange={(event) => setCategory(event.target.value)} className="h-12 w-full appearance-none rounded-2xl border border-black/8 bg-[var(--paper)] pl-4 pr-10 text-sm font-bold lg:w-56"><option value="all">All categories</option>{categories.map((name) => <option key={name}>{name}</option>)}</select><ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-[var(--muted)]"/></label>
       </div>
-      <div className="scrollbar-none mt-4 flex gap-2 overflow-x-auto pb-1" aria-label="Severity filters">{(["all", "safety_hazard", "recommendation", "maintenance_item"] as const).map((value) => <button key={value} type="button" onClick={() => setSeverity(value)} className={`min-h-10 shrink-0 rounded-xl px-4 text-xs font-extrabold ${severity === value ? "bg-[var(--forest)] text-white" : "border border-black/7 bg-white/60 text-[var(--muted)]"}`}>{value === "all" ? `All ${findings.length}` : severityLabels[value]}</button>)}</div>
+      <div className="scrollbar-none mt-4 flex gap-2 overflow-x-auto pb-1" aria-label="Severity filters">{(["all", "safety_hazard", "recommendation", "maintenance_item"] as const).map((value) => <button key={value} type="button" onClick={() => setSeverity(value)} className={`min-h-10 shrink-0 rounded-xl px-4 text-xs font-extrabold ${severity === value ? "bg-[var(--forest)] text-white" : "border border-black/7 bg-white/60 text-[var(--muted)]"}`}>{value === "all" ? `All ${scopedFindings.length}` : severityLabels[value]}</button>)}</div>
       <div className="mt-5 flex items-center justify-between"><p className="text-xs font-bold text-[var(--muted)]">Showing {filtered.length} items</p><span className="text-xs font-bold text-[var(--muted)]">Newest source first</span></div>
       <div className="mt-2 grid gap-3 xl:grid-cols-2">{filtered.map((item) => <FindingCard key={item.workItemId ?? item.reportId} item={item} status={reviewStatuses[item.reportId] ?? "needs_review"} menuOpen={menuItemId === item.reportId} onOpen={() => { setMenuItemId(null); setRequestedStatus(null); setSelectedItem(item); }} onToggleMenu={() => setMenuItemId((current) => current === item.reportId ? null : item.reportId)} onSetStatus={(status) => { setMenuItemId(null); setRequestedStatus(status); setSelectedItem(item); }} />)}</div>
-      {filtered.length === 0 ? <div className="mt-8 rounded-[24px] border border-dashed border-black/15 p-10 text-center"><Search className="mx-auto size-7 text-[var(--muted)]"/><h2 className="font-display mt-3 text-lg font-extrabold">No matching work</h2><p className="mt-1 text-sm text-[var(--muted)]">Try another search or clear a filter.</p></div> : null}
+      {filtered.length === 0 ? <div className="mt-8 rounded-[24px] border border-dashed border-black/15 p-10 text-center"><Search className="mx-auto size-7 text-[var(--muted)]"/><h2 className="font-display mt-3 text-lg font-extrabold">{scope === "history" && historyCount === 0 ? "No closed work yet" : "No matching work"}</h2><p className="mt-1 text-sm text-[var(--muted)]">{scope === "history" && historyCount === 0 ? "Completed and dismissed items will appear here." : "Try another search or clear a filter."}</p></div> : null}
     </div>
     {selectedItem ? <FindingReviewDialog key={`${selectedItem.reportId}-${requestedStatus ?? "details"}`} item={selectedItem} status={reviewStatuses[selectedItem.reportId] ?? "needs_review"} activities={reviewActivities.filter((activity) => activity.reportId === selectedItem.reportId)} serviceRecords={serviceRecords.filter((record) => record.reportId === selectedItem.reportId)} initialStatus={requestedStatus} onClose={() => { setSelectedItem(null); setRequestedStatus(null); }} onRecordReview={(status, note) => onRecordReview(selectedItem.reportId, status, note)} onCompleteWork={(details) => onCompleteWork(selectedItem.reportId, details)} /> : null}
     </>
@@ -378,6 +401,20 @@ function FindingReviewDialog({ item, status, activities, serviceRecords, initial
   const [note, setNote] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const updateFormRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!pendingStatus) return;
+    const frame = window.requestAnimationFrame(() => {
+      updateFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [pendingStatus]);
+
+  const chooseStatus = (nextStatus: ReviewStatus) => {
+    setSaveError("");
+    setPendingStatus(nextStatus);
+  };
 
   const saveUpdate = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -385,9 +422,11 @@ function FindingReviewDialog({ item, status, activities, serviceRecords, initial
     setIsSaving(true);
     setSaveError("");
     try {
-      await onRecordReview(pendingStatus, note);
+      const savedStatus = pendingStatus;
+      await onRecordReview(savedStatus, note);
       setPendingStatus(null);
       setNote("");
+      if (savedStatus === "not_applicable") onClose();
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : "The update could not be saved.");
     } finally {
@@ -402,6 +441,7 @@ function FindingReviewDialog({ item, status, activities, serviceRecords, initial
       await onCompleteWork(details);
       setPendingStatus(null);
       setNote("");
+      onClose();
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : "The completion could not be saved.");
     } finally {
@@ -427,8 +467,8 @@ function FindingReviewDialog({ item, status, activities, serviceRecords, initial
           <section>
             <p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--muted)]">Owner review</p>
             <p className="mt-2 text-sm leading-6 text-[var(--muted)]">Confirm the current condition before turning this historical inspection finding into active work.</p>
-            <div className="mt-4 grid gap-2 sm:grid-cols-2"><button type="button" onClick={() => setPendingStatus("open")} className="flex min-h-12 items-center justify-center gap-2 rounded-xl bg-[var(--forest)] px-4 text-sm font-extrabold text-white"><ClipboardCheck className="size-[18px]"/> Still needs work</button><button type="button" onClick={() => setPendingStatus("completed")} className="flex min-h-12 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white px-4 text-sm font-extrabold"><CheckCircle2 className="size-[18px]"/> Already completed</button><button type="button" onClick={() => setPendingStatus("deferred")} className="min-h-11 rounded-xl border border-black/8 px-4 text-xs font-extrabold">Defer for later</button><button type="button" onClick={() => setPendingStatus("not_applicable")} className="min-h-11 rounded-xl px-4 text-xs font-extrabold text-[var(--muted)] hover:bg-black/5">Not applicable</button></div>
-            {pendingStatus === "completed" ? <CompletionForm isSaving={isSaving} error={saveError} onCancel={() => { setPendingStatus(null); setSaveError(""); }} onSubmit={saveCompletion} /> : pendingStatus ? <StatusUpdateForm status={pendingStatus} note={note} isSaving={isSaving} error={saveError} onNoteChange={setNote} onCancel={() => { setPendingStatus(null); setNote(""); setSaveError(""); }} onSubmit={saveUpdate} /> : null}
+            <div className="mt-4 grid gap-2 sm:grid-cols-2"><button type="button" aria-pressed={pendingStatus === "open"} onClick={() => chooseStatus("open")} className={`flex min-h-12 items-center justify-center gap-2 rounded-xl px-4 text-sm font-extrabold ${pendingStatus === "open" ? "bg-[var(--forest)] text-white" : "border border-black/10 bg-white"}`}><ClipboardCheck className="size-[18px]"/> Still needs work</button><button type="button" aria-pressed={pendingStatus === "completed"} onClick={() => chooseStatus("completed")} className={`flex min-h-12 items-center justify-center gap-2 rounded-xl px-4 text-sm font-extrabold ${pendingStatus === "completed" ? "bg-[var(--forest)] text-white" : "border border-black/10 bg-white"}`}><CheckCircle2 className="size-[18px]"/> Already completed</button><button type="button" aria-pressed={pendingStatus === "deferred"} onClick={() => chooseStatus("deferred")} className={`min-h-11 rounded-xl px-4 text-xs font-extrabold ${pendingStatus === "deferred" ? "bg-[var(--forest)] text-white" : "border border-black/8"}`}>Defer for later</button><button type="button" aria-pressed={pendingStatus === "not_applicable"} onClick={() => chooseStatus("not_applicable")} className={`min-h-11 rounded-xl px-4 text-xs font-extrabold ${pendingStatus === "not_applicable" ? "bg-[var(--forest)] text-white" : "text-[var(--muted)] hover:bg-black/5"}`}>Not applicable</button></div>
+            {pendingStatus ? <div ref={updateFormRef} className="scroll-mt-28">{pendingStatus === "completed" ? <CompletionForm isSaving={isSaving} error={saveError} onCancel={() => { setPendingStatus(null); setSaveError(""); }} onSubmit={saveCompletion} /> : <StatusUpdateForm status={pendingStatus} note={note} isSaving={isSaving} error={saveError} onNoteChange={setNote} onCancel={() => { setPendingStatus(null); setNote(""); setSaveError(""); }} onSubmit={saveUpdate} />}</div> : null}
             <p className="mt-3 text-center text-[10px] font-bold text-[var(--muted)]">Synced privately · changes appear for every household member.</p>
           </section>
           <ServiceHistory records={serviceRecords} />

@@ -15,3 +15,7 @@ export function databaseStatusToReview(status: string | null): ReviewStatus {
   if (status === "rejected" || status === "canceled") return "not_applicable";
   return "needs_review";
 }
+
+export function isClosedReviewStatus(status: ReviewStatus | undefined) {
+  return status === "completed" || status === "not_applicable";
+}

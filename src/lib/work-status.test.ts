@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { databaseStatusToReview, reviewStatusToDatabase } from "./work-status";
+import { databaseStatusToReview, isClosedReviewStatus, reviewStatusToDatabase } from "./work-status";
 
 describe("work status mapping", () => {
   it("maps every owner review state to a database state", () => {
@@ -17,5 +17,14 @@ describe("work status mapping", () => {
     expect(databaseStatusToReview("in_progress")).toBe("open");
     expect(databaseStatusToReview("canceled")).toBe("not_applicable");
     expect(databaseStatusToReview("inbox")).toBe("needs_review");
+  });
+
+  it("separates closed work from the current work queue", () => {
+    expect(isClosedReviewStatus("completed")).toBe(true);
+    expect(isClosedReviewStatus("not_applicable")).toBe(true);
+    expect(isClosedReviewStatus("needs_review")).toBe(false);
+    expect(isClosedReviewStatus("open")).toBe(false);
+    expect(isClosedReviewStatus("deferred")).toBe(false);
+    expect(isClosedReviewStatus(undefined)).toBe(false);
   });
 });
