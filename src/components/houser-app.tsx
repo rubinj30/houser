@@ -35,7 +35,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useMemo, useState } from "react";
-import { createManualWorkItemAction, recordReviewUpdateAction, signOutAction } from "@/app/actions";
+import { completeWorkItemAction, createManualWorkItemAction, recordReviewUpdateAction, signOutAction } from "@/app/actions";
 import {
   countBySeverity,
   filterFindings,
@@ -44,7 +44,7 @@ import {
   mergeFindings,
   severityLabels,
 } from "@/lib/findings";
-import type { Finding, InspectionSeed, LocalWorkItem, ReviewActivity, ReviewStatus, Severity } from "@/lib/types";
+import type { Finding, InspectionSeed, LocalWorkItem, ReviewActivity, ReviewStatus, ServiceRecord, Severity, WorkCompletionInput } from "@/lib/types";
 
 type View = "home" | "work" | "timeline" | "assets";
 type WorkIntent = {
@@ -53,6 +53,7 @@ type WorkIntent = {
   selectedReportId: string | null;
   revision: number;
 };
+type CompletionDetails = Omit<WorkCompletionInput, "workItemId" | "reportId">;
 const reviewStatusLabels: Record<ReviewStatus, string> = {
   needs_review: "Needs review",
   open: "Still needs work",
@@ -78,13 +79,14 @@ const navItems: { id: View; label: string; icon: LucideIcon }[] = [
   { id: "assets", label: "Assets", icon: Grid2X2 },
 ];
 
-export function HouserApp({ seed, propertyId, userEmail, initialReviewStatuses, initialReviewActivities }: { seed: InspectionSeed; propertyId: string; userEmail: string; initialReviewStatuses: Record<string, ReviewStatus>; initialReviewActivities: ReviewActivity[] }) {
+export function HouserApp({ seed, propertyId, userEmail, initialReviewStatuses, initialReviewActivities, initialServiceRecords }: { seed: InspectionSeed; propertyId: string; userEmail: string; initialReviewStatuses: Record<string, ReviewStatus>; initialReviewActivities: ReviewActivity[]; initialServiceRecords: ServiceRecord[] }) {
   const [activeView, setActiveView] = useState<View>("home");
   const [property, setProperty] = useState<"ivy" | "rental">("ivy");
   const [isAdding, setIsAdding] = useState(false);
   const [localItems, setLocalItems] = useState<LocalWorkItem[]>([]);
   const [reviewStatuses, setReviewStatuses] = useState(initialReviewStatuses);
   const [reviewActivities, setReviewActivities] = useState(initialReviewActivities);
+  const [serviceRecords, setServiceRecords] = useState(initialServiceRecords);
   const [workIntent, setWorkIntent] = useState<WorkIntent>({ category: "all", severity: "all", selectedReportId: null, revision: 0 });
   const allFindings = useMemo(() => mergeFindings(localItems, seed.findings), [localItems, seed.findings]);
 
@@ -94,6 +96,16 @@ export function HouserApp({ seed, propertyId, userEmail, initialReviewStatuses, 
     const result = await recordReviewUpdateAction({ workItemId: item.workItemId, reportId, status, note });
     setReviewStatuses((current) => ({ ...current, [reportId]: result.status }));
     setReviewActivities((current) => [result.activity, ...current]);
+  };
+
+  const completeWorkItem = async (reportId: string, details: CompletionDetails) => {
+    const item = allFindings.find((finding) => finding.reportId === reportId);
+    if (!item?.workItemId) throw new Error("This work item has not been connected to the database yet.");
+    const result = await completeWorkItemAction({ workItemId: item.workItemId, reportId, ...details });
+    setReviewStatuses((current) => ({ ...current, [reportId]: result.status }));
+    setReviewActivities((current) => [result.activity, ...current]);
+    setServiceRecords((current) => [result.serviceRecord, ...current]);
+    return result;
   };
 
   const changeView = (view: View) => {
@@ -126,9 +138,9 @@ export function HouserApp({ seed, propertyId, userEmail, initialReviewStatuses, 
           ) : activeView === "home" ? (
             <HomeView seed={seed} findings={allFindings} onOpenWork={openWork} />
           ) : activeView === "work" ? (
-            <WorkView key={workIntent.revision} findings={allFindings} initialCategory={workIntent.category} initialSeverity={workIntent.severity} initialSelectedReportId={workIntent.selectedReportId} reviewStatuses={reviewStatuses} reviewActivities={reviewActivities} onRecordReview={recordReviewUpdate} />
+            <WorkView key={workIntent.revision} findings={allFindings} initialCategory={workIntent.category} initialSeverity={workIntent.severity} initialSelectedReportId={workIntent.selectedReportId} reviewStatuses={reviewStatuses} reviewActivities={reviewActivities} serviceRecords={serviceRecords} onRecordReview={recordReviewUpdate} onCompleteWork={completeWorkItem} />
           ) : activeView === "timeline" ? (
-            <TimelineView findings={allFindings} reviewStatuses={reviewStatuses} reviewActivities={reviewActivities} onRecordReview={recordReviewUpdate} />
+            <TimelineView findings={allFindings} reviewStatuses={reviewStatuses} reviewActivities={reviewActivities} serviceRecords={serviceRecords} onRecordReview={recordReviewUpdate} onCompleteWork={completeWorkItem} />
           ) : (
             <AssetsView seed={seed} />
           )}
@@ -312,7 +324,7 @@ function CompactFinding({ item, last, onOpen }: { item: Finding; last: boolean; 
   return <button type="button" onClick={onOpen} className={`group flex w-full gap-3 p-4 text-left transition hover:bg-[var(--mint)]/35 sm:p-5 ${last ? "" : "border-b border-black/6"}`} aria-label={`Open ${item.title}`}><div className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-xl bg-[#f8ddd7] text-[#a33e32]"><AlertTriangle className="size-[17px]" /></div><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-2"><h3 className="text-sm font-extrabold leading-5 group-hover:text-[var(--forest)]">{item.title}</h3><ArrowRight className="size-4 shrink-0 text-[var(--muted)] transition group-hover:translate-x-0.5 group-hover:text-[var(--forest)]" /></div><p className="mt-1 truncate text-xs text-[var(--muted)]">{item.location}</p><div className="mt-2 flex items-center gap-2 text-[10px] font-extrabold uppercase tracking-[0.08em] text-[var(--muted)]"><Camera className="size-3" /> {formatSourcePages(item.sourcePages)}</div></div></button>;
 }
 
-function WorkView({ findings, initialCategory, initialSeverity, initialSelectedReportId, reviewStatuses, reviewActivities, onRecordReview }: { findings: Finding[]; initialCategory: string; initialSeverity: Severity | "all"; initialSelectedReportId: string | null; reviewStatuses: Record<string, ReviewStatus>; reviewActivities: ReviewActivity[]; onRecordReview: (reportId: string, status: ReviewStatus, note: string) => Promise<void> }) {
+function WorkView({ findings, initialCategory, initialSeverity, initialSelectedReportId, reviewStatuses, reviewActivities, serviceRecords, onRecordReview, onCompleteWork }: { findings: Finding[]; initialCategory: string; initialSeverity: Severity | "all"; initialSelectedReportId: string | null; reviewStatuses: Record<string, ReviewStatus>; reviewActivities: ReviewActivity[]; serviceRecords: ServiceRecord[]; onRecordReview: (reportId: string, status: ReviewStatus, note: string) => Promise<void>; onCompleteWork: (reportId: string, details: CompletionDetails) => Promise<unknown> }) {
   const [query, setQuery] = useState("");
   const [severity, setSeverity] = useState<Severity | "all">(initialSeverity);
   const [category, setCategory] = useState(initialCategory);
@@ -335,7 +347,7 @@ function WorkView({ findings, initialCategory, initialSeverity, initialSelectedR
       <div className="mt-2 grid gap-3 xl:grid-cols-2">{filtered.map((item) => <FindingCard key={item.workItemId ?? item.reportId} item={item} status={reviewStatuses[item.reportId] ?? "needs_review"} menuOpen={menuItemId === item.reportId} onOpen={() => { setMenuItemId(null); setRequestedStatus(null); setSelectedItem(item); }} onToggleMenu={() => setMenuItemId((current) => current === item.reportId ? null : item.reportId)} onSetStatus={(status) => { setMenuItemId(null); setRequestedStatus(status); setSelectedItem(item); }} />)}</div>
       {filtered.length === 0 ? <div className="mt-8 rounded-[24px] border border-dashed border-black/15 p-10 text-center"><Search className="mx-auto size-7 text-[var(--muted)]"/><h2 className="font-display mt-3 text-lg font-extrabold">No matching work</h2><p className="mt-1 text-sm text-[var(--muted)]">Try another search or clear a filter.</p></div> : null}
     </div>
-    {selectedItem ? <FindingReviewDialog key={`${selectedItem.reportId}-${requestedStatus ?? "details"}`} item={selectedItem} status={reviewStatuses[selectedItem.reportId] ?? "needs_review"} activities={reviewActivities.filter((activity) => activity.reportId === selectedItem.reportId)} initialStatus={requestedStatus} onClose={() => { setSelectedItem(null); setRequestedStatus(null); }} onRecordReview={(status, note) => onRecordReview(selectedItem.reportId, status, note)} /> : null}
+    {selectedItem ? <FindingReviewDialog key={`${selectedItem.reportId}-${requestedStatus ?? "details"}`} item={selectedItem} status={reviewStatuses[selectedItem.reportId] ?? "needs_review"} activities={reviewActivities.filter((activity) => activity.reportId === selectedItem.reportId)} serviceRecords={serviceRecords.filter((record) => record.reportId === selectedItem.reportId)} initialStatus={requestedStatus} onClose={() => { setSelectedItem(null); setRequestedStatus(null); }} onRecordReview={(status, note) => onRecordReview(selectedItem.reportId, status, note)} onCompleteWork={(details) => onCompleteWork(selectedItem.reportId, details)} /> : null}
     </>
   );
 }
@@ -354,7 +366,7 @@ function ReviewStatusPill({ status }: { status: ReviewStatus }) {
   return <span className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold ${style}`}>{reviewStatusLabels[status]}</span>;
 }
 
-function FindingReviewDialog({ item, status, activities, initialStatus, onClose, onRecordReview }: { item: Finding; status: ReviewStatus; activities: ReviewActivity[]; initialStatus: ReviewStatus | null; onClose: () => void; onRecordReview: (status: ReviewStatus, note: string) => Promise<void> }) {
+function FindingReviewDialog({ item, status, activities, serviceRecords, initialStatus, onClose, onRecordReview, onCompleteWork }: { item: Finding; status: ReviewStatus; activities: ReviewActivity[]; serviceRecords: ServiceRecord[]; initialStatus: ReviewStatus | null; onClose: () => void; onRecordReview: (status: ReviewStatus, note: string) => Promise<void>; onCompleteWork: (details: CompletionDetails) => Promise<unknown> }) {
   const [pendingStatus, setPendingStatus] = useState<ReviewStatus | null>(initialStatus);
   const [note, setNote] = useState("");
   const [isSaving, setIsSaving] = useState(false);
@@ -376,7 +388,48 @@ function FindingReviewDialog({ item, status, activities, initialStatus, onClose,
     }
   };
 
-  return <div className="fixed inset-0 z-50 flex items-end justify-end bg-[#0d1e17]/45 backdrop-blur-sm sm:p-4" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}><section role="dialog" aria-modal="true" aria-labelledby="finding-review-title" className="max-h-[92dvh] w-full overflow-y-auto rounded-t-[28px] bg-[var(--paper)] shadow-2xl sm:h-full sm:max-h-none sm:max-w-xl sm:rounded-[28px]"><div className="sticky top-0 z-10 flex items-start justify-between border-b border-black/6 bg-[rgba(252,251,248,0.94)] p-5 backdrop-blur-xl sm:p-7"><div className="pr-4"><p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--forest)]">{item.reportId} · {item.category}</p><h2 id="finding-review-title" className="font-display mt-2 text-2xl font-extrabold leading-tight tracking-[-0.04em]">{item.title}</h2><div className="mt-3"><ReviewStatusPill status={status} /></div></div><button type="button" onClick={onClose} className="grid size-10 shrink-0 place-items-center rounded-xl bg-black/5 hover:bg-black/10" aria-label="Close review"><X className="size-5"/></button></div><div className="space-y-6 p-5 sm:p-7"><section><p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--muted)]">Inspector recommendation</p><p className="mt-2 text-sm leading-6">{item.suggestedAction}</p></section><dl className="grid grid-cols-2 gap-3"><Detail label="Area" value={item.area} /><Detail label="Location" value={item.location} icon={MapPin} /><Detail label="Priority" value={item.priority} /><Detail label="Work type" value={item.workType} /></dl><section className="rounded-[22px] border border-black/7 bg-white/65 p-4"><div className="flex items-start gap-3"><div className="grid size-10 shrink-0 place-items-center rounded-xl bg-[var(--mint)] text-[var(--forest)]"><ImageIcon className="size-[18px]"/></div><div><p className="text-xs font-extrabold">Inspection evidence</p><p className="mt-1 text-sm font-bold text-[var(--forest)]">{item.sourcePages.length ? formatSourcePages(item.sourcePages) : "Manual entry"}</p><p className="mt-2 text-xs leading-5 text-[var(--muted)]">The source reference is preserved. The original page capture will appear here after private document storage is connected.</p></div></div></section><section><p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--muted)]">Owner review</p><p className="mt-2 text-sm leading-6 text-[var(--muted)]">Confirm the current condition before turning this historical inspection finding into active work.</p><div className="mt-4 grid gap-2 sm:grid-cols-2"><button type="button" onClick={() => setPendingStatus("open")} className="flex min-h-12 items-center justify-center gap-2 rounded-xl bg-[var(--forest)] px-4 text-sm font-extrabold text-white"><ClipboardCheck className="size-[18px]"/> Still needs work</button><button type="button" onClick={() => setPendingStatus("completed")} className="flex min-h-12 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white px-4 text-sm font-extrabold"><CheckCircle2 className="size-[18px]"/> Already completed</button><button type="button" onClick={() => setPendingStatus("deferred")} className="min-h-11 rounded-xl border border-black/8 px-4 text-xs font-extrabold">Defer for later</button><button type="button" onClick={() => setPendingStatus("not_applicable")} className="min-h-11 rounded-xl px-4 text-xs font-extrabold text-[var(--muted)] hover:bg-black/5">Not applicable</button></div>{pendingStatus ? <StatusUpdateForm status={pendingStatus} note={note} isSaving={isSaving} error={saveError} onNoteChange={setNote} onCancel={() => { setPendingStatus(null); setNote(""); setSaveError(""); }} onSubmit={saveUpdate} /> : null}<p className="mt-3 text-center text-[10px] font-bold text-[var(--muted)]">Synced privately · changes appear for every household member.</p></section><ActivityHistory activities={activities} /></div></section></div>;
+  const saveCompletion = async (details: CompletionDetails) => {
+    setIsSaving(true);
+    setSaveError("");
+    try {
+      await onCompleteWork(details);
+      setPendingStatus(null);
+      setNote("");
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "The completion could not be saved.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-end bg-[#0d1e17]/45 backdrop-blur-sm sm:p-4" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
+      <section role="dialog" aria-modal="true" aria-labelledby="finding-review-title" className="max-h-[92dvh] w-full overflow-y-auto rounded-t-[28px] bg-[var(--paper)] shadow-2xl sm:h-full sm:max-h-none sm:max-w-xl sm:rounded-[28px]">
+        <div className="sticky top-0 z-10 flex items-start justify-between border-b border-black/6 bg-[rgba(252,251,248,0.94)] p-5 backdrop-blur-xl sm:p-7">
+          <div className="pr-4">
+            <p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--forest)]">{item.reportId} · {item.category}</p>
+            <h2 id="finding-review-title" className="font-display mt-2 text-2xl font-extrabold leading-tight tracking-[-0.04em]">{item.title}</h2>
+            <div className="mt-3"><ReviewStatusPill status={status} /></div>
+          </div>
+          <button type="button" onClick={onClose} className="grid size-10 shrink-0 place-items-center rounded-xl bg-black/5 hover:bg-black/10" aria-label="Close review"><X className="size-5"/></button>
+        </div>
+        <div className="space-y-6 p-5 sm:p-7">
+          <section><p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--muted)]">Inspector recommendation</p><p className="mt-2 text-sm leading-6">{item.suggestedAction}</p></section>
+          <dl className="grid grid-cols-2 gap-3"><Detail label="Area" value={item.area} /><Detail label="Location" value={item.location} icon={MapPin} /><Detail label="Priority" value={item.priority} /><Detail label="Work type" value={item.workType} /></dl>
+          <section className="rounded-[22px] border border-black/7 bg-white/65 p-4"><div className="flex items-start gap-3"><div className="grid size-10 shrink-0 place-items-center rounded-xl bg-[var(--mint)] text-[var(--forest)]"><ImageIcon className="size-[18px]"/></div><div><p className="text-xs font-extrabold">Inspection evidence</p><p className="mt-1 text-sm font-bold text-[var(--forest)]">{item.sourcePages.length ? formatSourcePages(item.sourcePages) : "Manual entry"}</p><p className="mt-2 text-xs leading-5 text-[var(--muted)]">The source reference is preserved. The original page capture will appear here after private document storage is connected.</p></div></div></section>
+          <section>
+            <p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--muted)]">Owner review</p>
+            <p className="mt-2 text-sm leading-6 text-[var(--muted)]">Confirm the current condition before turning this historical inspection finding into active work.</p>
+            <div className="mt-4 grid gap-2 sm:grid-cols-2"><button type="button" onClick={() => setPendingStatus("open")} className="flex min-h-12 items-center justify-center gap-2 rounded-xl bg-[var(--forest)] px-4 text-sm font-extrabold text-white"><ClipboardCheck className="size-[18px]"/> Still needs work</button><button type="button" onClick={() => setPendingStatus("completed")} className="flex min-h-12 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white px-4 text-sm font-extrabold"><CheckCircle2 className="size-[18px]"/> Already completed</button><button type="button" onClick={() => setPendingStatus("deferred")} className="min-h-11 rounded-xl border border-black/8 px-4 text-xs font-extrabold">Defer for later</button><button type="button" onClick={() => setPendingStatus("not_applicable")} className="min-h-11 rounded-xl px-4 text-xs font-extrabold text-[var(--muted)] hover:bg-black/5">Not applicable</button></div>
+            {pendingStatus === "completed" ? <CompletionForm isSaving={isSaving} error={saveError} onCancel={() => { setPendingStatus(null); setSaveError(""); }} onSubmit={saveCompletion} /> : pendingStatus ? <StatusUpdateForm status={pendingStatus} note={note} isSaving={isSaving} error={saveError} onNoteChange={setNote} onCancel={() => { setPendingStatus(null); setNote(""); setSaveError(""); }} onSubmit={saveUpdate} /> : null}
+            <p className="mt-3 text-center text-[10px] font-bold text-[var(--muted)]">Synced privately · changes appear for every household member.</p>
+          </section>
+          <ServiceHistory records={serviceRecords} />
+          <ActivityHistory activities={activities} />
+        </div>
+      </section>
+    </div>
+  );
 }
 
 function StatusUpdateForm({ status, note, isSaving, error, onNoteChange, onCancel, onSubmit }: { status: ReviewStatus; note: string; isSaving: boolean; error: string; onNoteChange: (note: string) => void; onCancel: () => void; onSubmit: (event: React.FormEvent) => void }) {
@@ -387,6 +440,59 @@ function StatusUpdateForm({ status, note, isSaving, error, onNoteChange, onCance
     not_applicable: "Why doesn't this apply?",
   };
   return <form onSubmit={onSubmit} className="mt-4 rounded-[20px] border border-[var(--forest)]/15 bg-[var(--mint)]/55 p-4"><div className="flex items-center justify-between gap-3"><div><p className="text-[10px] font-extrabold uppercase tracking-[0.1em] text-[var(--forest)]">Update status</p><p className="mt-1 text-sm font-extrabold">{reviewStatusLabels[status]}</p></div><ReviewStatusPill status={status} /></div><label className="mt-4 block"><span className="text-xs font-extrabold">{prompts[status] ?? "Add a note"} <span className="font-medium text-[var(--muted)]">(optional)</span></span><textarea autoFocus value={note} onChange={(event) => onNoteChange(event.target.value)} rows={4} placeholder="Add details that will help you understand this update later…" className="mt-2 w-full resize-y rounded-xl border border-black/10 bg-white p-3 text-sm leading-5 outline-none focus:border-[var(--forest)]/40" /></label>{error ? <p role="alert" className="mt-3 rounded-xl bg-[#f8ddd7] px-3 py-2 text-xs font-bold text-[#8c3328]">{error}</p> : null}<div className="mt-3 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><button type="button" disabled={isSaving} onClick={onCancel} className="min-h-11 rounded-xl px-4 text-xs font-extrabold text-[var(--muted)] hover:bg-black/5 disabled:opacity-50">Cancel</button><button type="submit" disabled={isSaving} className="min-h-11 rounded-xl bg-[var(--forest)] px-5 text-xs font-extrabold text-white disabled:opacity-60">{isSaving ? "Saving…" : "Save update"}</button></div></form>;
+}
+
+function CompletionForm({ isSaving, error, onCancel, onSubmit }: { isSaving: boolean; error: string; onCancel: () => void; onSubmit: (details: CompletionDetails) => Promise<void> }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [performedOn, setPerformedOn] = useState(today);
+  const [vendorName, setVendorName] = useState("");
+  const [cost, setCost] = useState("");
+  const [note, setNote] = useState("");
+  const [warrantyEndsOn, setWarrantyEndsOn] = useState("");
+  const [recurrence, setRecurrence] = useState("");
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    await onSubmit({
+      performedOn,
+      vendorName,
+      cost,
+      note,
+      warrantyEndsOn,
+      recurrenceMonths: recurrence ? Number(recurrence) : null,
+    });
+  };
+
+  const fieldClass = "mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 text-sm outline-none focus:border-[var(--forest)]/40";
+  return (
+    <form onSubmit={submit} className="mt-4 rounded-[20px] border border-[var(--forest)]/15 bg-[var(--mint)]/55 p-4">
+      <div className="flex items-center justify-between gap-3"><div><p className="text-[10px] font-extrabold uppercase tracking-[0.1em] text-[var(--forest)]">Record completed work</p><p className="mt-1 text-sm font-extrabold">Create a permanent service record</p></div><ReviewStatusPill status="completed" /></div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <label><span className="text-xs font-extrabold">Completion date</span><input required type="date" max={today} value={performedOn} onChange={(event) => setPerformedOn(event.target.value)} className={fieldClass} /></label>
+        <label><span className="text-xs font-extrabold">Vendor <span className="font-medium text-[var(--muted)]">(optional)</span></span><input value={vendorName} onChange={(event) => setVendorName(event.target.value)} placeholder="Company or person" className={fieldClass} /></label>
+        <label><span className="text-xs font-extrabold">Actual cost <span className="font-medium text-[var(--muted)]">(optional)</span></span><div className="relative"><span className="pointer-events-none absolute left-3 top-1/2 mt-1 -translate-y-1/2 text-sm text-[var(--muted)]">$</span><input inputMode="decimal" value={cost} onChange={(event) => setCost(event.target.value)} placeholder="0.00" className={`${fieldClass} pl-7`} /></div></label>
+        <label><span className="text-xs font-extrabold">Warranty ends <span className="font-medium text-[var(--muted)]">(optional)</span></span><input type="date" min={performedOn} value={warrantyEndsOn} onChange={(event) => setWarrantyEndsOn(event.target.value)} className={fieldClass} /></label>
+      </div>
+      <label className="mt-3 block"><span className="text-xs font-extrabold">What was done? <span className="font-medium text-[var(--muted)]">(optional)</span></span><textarea value={note} onChange={(event) => setNote(event.target.value)} rows={4} placeholder="Repairs, parts, observations, and anything useful for next time…" className="mt-2 w-full resize-y rounded-xl border border-black/10 bg-white p-3 text-sm leading-5 outline-none focus:border-[var(--forest)]/40" /></label>
+      <label className="mt-3 block"><span className="text-xs font-extrabold">Schedule this again?</span><select value={recurrence} onChange={(event) => setRecurrence(event.target.value)} className={fieldClass}><option value="">No recurring follow-up</option><option value="3">In 3 months</option><option value="6">In 6 months</option><option value="12">In 1 year</option><option value="24">In 2 years</option><option value="60">In 5 years</option></select></label>
+      {recurrence ? <p className="mt-2 rounded-xl bg-white/70 px-3 py-2 text-xs leading-5 text-[var(--muted)]">Houser will close this item and create the next scheduled occurrence from the completion date.</p> : null}
+      {error ? <p role="alert" className="mt-3 rounded-xl bg-[#f8ddd7] px-3 py-2 text-xs font-bold text-[#8c3328]">{error}</p> : null}
+      <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><button type="button" disabled={isSaving} onClick={onCancel} className="min-h-11 rounded-xl px-4 text-xs font-extrabold text-[var(--muted)] hover:bg-black/5 disabled:opacity-50">Cancel</button><button type="submit" disabled={isSaving || !performedOn} className="min-h-11 rounded-xl bg-[var(--forest)] px-5 text-xs font-extrabold text-white disabled:opacity-60">{isSaving ? "Saving service…" : "Complete & save service"}</button></div>
+    </form>
+  );
+}
+
+function ServiceHistory({ records }: { records: ServiceRecord[] }) {
+  if (!records.length) return null;
+  return <section><div className="flex items-center gap-2"><FileText className="size-4 text-[var(--forest)]"/><p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--muted)]">Service history</p></div><ol className="mt-3 space-y-3">{records.map((record) => <li key={record.id} className="rounded-[18px] border border-black/6 bg-white/65 p-4"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-extrabold">{formatDateOnly(record.performedOn)}</p>{record.costMinor === null ? null : <span className="text-sm font-extrabold text-[var(--forest)]">{formatMoney(record.costMinor, record.currency)}</span>}</div><p className="mt-2 text-sm leading-6">{record.description}</p>{record.vendorName ? <p className="mt-1 text-xs font-bold text-[var(--muted)]">Vendor: {record.vendorName}</p> : null}{record.warrantyEndsOn ? <p className="mt-1 text-xs text-[var(--muted)]">Warranty through {formatDateOnly(record.warrantyEndsOn)}</p> : null}{record.nextServiceOn ? <p className="mt-3 rounded-xl bg-[var(--mint)] px-3 py-2 text-xs font-extrabold text-[var(--forest)]">Next service scheduled for {formatDateOnly(record.nextServiceOn)}</p> : null}</li>)}</ol></section>;
+}
+
+function formatDateOnly(value: string) {
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date(`${value}T12:00:00`));
+}
+
+function formatMoney(minor: number, currency: string) {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(minor / 100);
 }
 
 function ActivityHistory({ activities }: { activities: ReviewActivity[] }) {
@@ -401,12 +507,12 @@ function Detail({ label, value, icon: Icon }: { label: string; value: string; ic
   return <div className="rounded-2xl bg-black/[0.035] p-3"><dt className="flex items-center gap-1 text-[10px] font-extrabold uppercase tracking-[0.08em] text-[var(--muted)]">{Icon ? <Icon className="size-3"/> : null}{label}</dt><dd className="mt-1 break-words text-xs font-bold capitalize">{value.replaceAll("_", " ")}</dd></div>;
 }
 
-function TimelineView({ findings, reviewStatuses, reviewActivities, onRecordReview }: { findings: Finding[]; reviewStatuses: Record<string, ReviewStatus>; reviewActivities: ReviewActivity[]; onRecordReview: (reportId: string, status: ReviewStatus, note: string) => Promise<void> }) {
+function TimelineView({ findings, reviewStatuses, reviewActivities, serviceRecords, onRecordReview, onCompleteWork }: { findings: Finding[]; reviewStatuses: Record<string, ReviewStatus>; reviewActivities: ReviewActivity[]; serviceRecords: ServiceRecord[]; onRecordReview: (reportId: string, status: ReviewStatus, note: string) => Promise<void>; onCompleteWork: (reportId: string, details: CompletionDetails) => Promise<unknown> }) {
   const [selectedItem, setSelectedItem] = useState<Finding | null>(null);
   const safety = findings.filter((item) => item.severity === "safety_hazard");
   const important = findings.filter((item) => item.priority === "important" && item.severity !== "safety_hazard");
   const routine = findings.filter((item) => item.priority === "routine" || item.priority === "informational");
-  return <><div className="enter"><PageHeading eyebrow="Plan by time" title="Maintenance timeline" description="The initial report has no trusted due dates yet, so work is grouped by recommended review horizon." /><div className="mt-8 max-w-4xl space-y-8"><TimelineGroup label="Verify first" note="Safety findings · review now" color="rose" items={safety} reviewStatuses={reviewStatuses} onOpen={setSelectedItem} /><TimelineGroup label="Plan next" note="Important recommendations · schedule after review" color="amber" items={important.slice(0, 8)} reviewStatuses={reviewStatuses} onOpen={setSelectedItem} /><TimelineGroup label="Routine & long-term" note="Maintenance, monitoring, and cosmetic work" color="forest" items={routine.slice(0, 8)} reviewStatuses={reviewStatuses} onOpen={setSelectedItem} /></div></div>{selectedItem ? <FindingReviewDialog item={selectedItem} status={reviewStatuses[selectedItem.reportId] ?? "needs_review"} activities={reviewActivities.filter((activity) => activity.reportId === selectedItem.reportId)} initialStatus={null} onClose={() => setSelectedItem(null)} onRecordReview={(status, note) => onRecordReview(selectedItem.reportId, status, note)} /> : null}</>;
+  return <><div className="enter"><PageHeading eyebrow="Plan by time" title="Maintenance timeline" description="The initial report has no trusted due dates yet, so work is grouped by recommended review horizon." /><div className="mt-8 max-w-4xl space-y-8"><TimelineGroup label="Verify first" note="Safety findings · review now" color="rose" items={safety} reviewStatuses={reviewStatuses} onOpen={setSelectedItem} /><TimelineGroup label="Plan next" note="Important recommendations · schedule after review" color="amber" items={important.slice(0, 8)} reviewStatuses={reviewStatuses} onOpen={setSelectedItem} /><TimelineGroup label="Routine & long-term" note="Maintenance, monitoring, and cosmetic work" color="forest" items={routine.slice(0, 8)} reviewStatuses={reviewStatuses} onOpen={setSelectedItem} /></div></div>{selectedItem ? <FindingReviewDialog item={selectedItem} status={reviewStatuses[selectedItem.reportId] ?? "needs_review"} activities={reviewActivities.filter((activity) => activity.reportId === selectedItem.reportId)} serviceRecords={serviceRecords.filter((record) => record.reportId === selectedItem.reportId)} initialStatus={null} onClose={() => setSelectedItem(null)} onRecordReview={(status, note) => onRecordReview(selectedItem.reportId, status, note)} onCompleteWork={(details) => onCompleteWork(selectedItem.reportId, details)} /> : null}</>;
 }
 
 function TimelineGroup({ label, note, color, items, reviewStatuses, onOpen }: { label: string; note: string; color: "rose" | "amber" | "forest"; items: Finding[]; reviewStatuses: Record<string, ReviewStatus>; onOpen: (item: Finding) => void }) {

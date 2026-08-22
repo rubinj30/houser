@@ -65,6 +65,37 @@ export type ReviewActivity = {
   createdAt: string;
 };
 
+export type ServiceRecord = {
+  id: string;
+  reportId: string;
+  performedOn: string;
+  description: string;
+  vendorName: string | null;
+  costMinor: number | null;
+  currency: string;
+  warrantyEndsOn: string | null;
+  recurrenceMonths: number | null;
+  nextServiceOn: string | null;
+};
+
+export type WorkCompletionInput = {
+  workItemId: string;
+  reportId: string;
+  performedOn: string;
+  vendorName: string;
+  cost: string;
+  note: string;
+  warrantyEndsOn: string;
+  recurrenceMonths: number | null;
+};
+
+export type WorkCompletionResult = {
+  status: ReviewStatus;
+  activity: ReviewActivity;
+  serviceRecord: ServiceRecord;
+  nextServiceOn: string | null;
+};
+
 export type HouserWorkspace = {
   accountId: string;
   propertyId: string;
@@ -73,4 +104,5 @@ export type HouserWorkspace = {
   findings: Finding[];
   reviewStatuses: Record<string, ReviewStatus>;
   reviewActivities: ReviewActivity[];
+  serviceRecords: ServiceRecord[];
 };

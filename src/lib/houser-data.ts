@@ -2,7 +2,7 @@ import "server-only";
 
 import inspectionSeed from "../../seed-data/sample-property-inspection.json";
 import { createClient } from "@/lib/supabase/server";
-import type { Finding, HouserWorkspace, InspectionSeed, ReviewActivity, ReviewStatus } from "@/lib/types";
+import type { Finding, HouserWorkspace, InspectionSeed, ReviewActivity, ReviewStatus, ServiceRecord } from "@/lib/types";
 import { databaseStatusToReview } from "@/lib/work-status";
 
 type WorkItemRow = {
@@ -24,6 +24,19 @@ type ActivityRow = {
   status_to: string | null;
   note: string | null;
   created_at: string;
+  work_items: { source_key: string | null } | { source_key: string | null }[] | null;
+};
+
+type ServiceRecordRow = {
+  id: string;
+  performed_on: string;
+  description: string;
+  vendor_name: string | null;
+  cost_minor: number | string | null;
+  currency: string;
+  warranty_ends_on: string | null;
+  recurrence_months: number | null;
+  next_service_on: string | null;
   work_items: { source_key: string | null } | { source_key: string | null }[] | null;
 };
 
@@ -89,7 +102,11 @@ export async function getHouserWorkspace(): Promise<HouserWorkspace | null> {
   if (propertyError) throw new Error(`Could not load Houser property: ${propertyError.message}`);
   if (!property) return null;
 
-  const [{ data: workItems, error: workItemsError }, { data: activities, error: activitiesError }] = await Promise.all([
+  const [
+    { data: workItems, error: workItemsError },
+    { data: activities, error: activitiesError },
+    { data: services, error: servicesError },
+  ] = await Promise.all([
     supabase
       .from("work_items")
       .select("id, source_key, title, description, work_type, status, priority, source_location, source_page_numbers, categories(name), areas(name)")
@@ -100,12 +117,18 @@ export async function getHouserWorkspace(): Promise<HouserWorkspace | null> {
       .from("activity_events")
       .select("id, status_to, note, created_at, work_items(source_key)")
       .eq("property_id", property.id)
-      .eq("event_type", "status_change")
+      .in("event_type", ["status_change", "service_recorded"])
       .order("created_at", { ascending: false }),
+    supabase
+      .from("service_records")
+      .select("id, performed_on, description, vendor_name, cost_minor, currency, warranty_ends_on, recurrence_months, next_service_on, work_items(source_key)")
+      .eq("property_id", property.id)
+      .order("performed_on", { ascending: false }),
   ]);
 
   if (workItemsError) throw new Error(`Could not load Houser work: ${workItemsError.message}`);
   if (activitiesError) throw new Error(`Could not load Houser activity: ${activitiesError.message}`);
+  if (servicesError) throw new Error(`Could not load Houser service history: ${servicesError.message}`);
 
   const seed = inspectionSeed as InspectionSeed;
   const seedByReportId = new Map(seed.findings.map((finding) => [finding.reportId, finding]));
@@ -128,6 +151,22 @@ export async function getHouserWorkspace(): Promise<HouserWorkspace | null> {
       createdAt: activity.created_at,
     }];
   });
+  const serviceRecords = ((services ?? []) as ServiceRecordRow[]).flatMap<ServiceRecord>((service) => {
+    const sourceKey = relatedSourceKey(service.work_items);
+    if (!sourceKey) return [];
+    return [{
+      id: service.id,
+      reportId: sourceKey,
+      performedOn: service.performed_on,
+      description: service.description,
+      vendorName: service.vendor_name,
+      costMinor: service.cost_minor === null ? null : Number(service.cost_minor),
+      currency: service.currency,
+      warrantyEndsOn: service.warranty_ends_on,
+      recurrenceMonths: service.recurrence_months,
+      nextServiceOn: service.next_service_on,
+    }];
+  });
 
   return {
     accountId: membership.account_id,
@@ -137,5 +176,6 @@ export async function getHouserWorkspace(): Promise<HouserWorkspace | null> {
     findings,
     reviewStatuses,
     reviewActivities,
+    serviceRecords,
   };
 }

@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(12);
+select plan(18);
 
 insert into auth.users (
   instance_id, id, aud, role, email, encrypted_password,
@@ -82,6 +82,35 @@ select results_eq(
   'the review function writes matching activity history'
 );
 
+select lives_ok(
+  $$ select public.complete_work_item('a1100000-0000-0000-0000-000000000001', current_date, 'Trusted HVAC', 18950, 'Completed annual service', current_date + 365, 12) $$,
+  'an owner can atomically complete work and record service'
+);
+
+select results_eq(
+  $$ select status from public.work_items where id = 'a1100000-0000-0000-0000-000000000001' $$,
+  array['completed'::text],
+  'completion closes the original work item'
+);
+
+select results_eq(
+  $$ select vendor_name || ':' || cost_minor::text || ':' || recurrence_months::text from public.service_records where work_item_id = 'a1100000-0000-0000-0000-000000000001' $$,
+  array['Trusted HVAC:18950:12'::text],
+  'completion preserves uniform vendor cost and recurrence data'
+);
+
+select results_eq(
+  $$ select status || ':' || recurrence_months::text from public.work_items where origin_service_record_id is not null $$,
+  array['scheduled:12'::text],
+  'recurring completion creates the next scheduled work item'
+);
+
+select results_eq(
+  $$ select event_type from public.activity_events where work_item_id = 'a1100000-0000-0000-0000-000000000001' order by created_at desc limit 1 $$,
+  array['service_recorded'::text],
+  'completion writes an auditable service event'
+);
+
 select set_config('request.jwt.claims', '{"sub":"20000000-0000-0000-0000-000000000002","role":"authenticated"}', true);
 
 select results_eq(
@@ -95,6 +124,13 @@ select throws_ok(
   'P0001',
   null,
   'another account cannot review the first account work item'
+);
+
+select throws_ok(
+  $$ select public.complete_work_item('a1100000-0000-0000-0000-000000000001', current_date, null, null, 'Forged service', null, null) $$,
+  'P0001',
+  null,
+  'another account cannot create a service record for the first account'
 );
 
 reset role;

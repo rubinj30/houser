@@ -6,7 +6,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
-import type { InspectionSeed, LocalWorkItem, ReviewActivity, ReviewStatus } from "@/lib/types";
+import type { InspectionSeed, LocalWorkItem, ReviewActivity, ReviewStatus, WorkCompletionInput, WorkCompletionResult } from "@/lib/types";
 import { databaseStatusToReview, reviewStatusToDatabase } from "@/lib/work-status";
 
 const reviewUpdateSchema = z.object({
@@ -21,6 +21,22 @@ const manualWorkSchema = z.object({
   title: z.string().trim().min(1).max(240),
   category: z.string().trim().min(1).max(100),
   area: z.string().trim().min(1).max(120),
+});
+
+const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date.");
+const completionSchema = z.object({
+  workItemId: z.uuid(),
+  reportId: z.string().min(1).max(160),
+  performedOn: dateSchema,
+  vendorName: z.string().trim().max(200),
+  cost: z.union([z.literal(""), z.string().trim().regex(/^\d+(?:\.\d{1,2})?$/, "Enter a valid amount with up to two decimal places.")]),
+  note: z.string().trim().max(5000),
+  warrantyEndsOn: z.union([z.literal(""), dateSchema]),
+  recurrenceMonths: z.number().int().min(1).max(1200).nullable(),
+}).superRefine((value, context) => {
+  if (value.warrantyEndsOn && value.warrantyEndsOn < value.performedOn) {
+    context.addIssue({ code: "custom", path: ["warrantyEndsOn"], message: "Warranty end date must be after completion." });
+  }
 });
 
 const magicLinkSchema = z.object({ email: z.email() });
@@ -45,6 +61,12 @@ function normalizeWorkType(value: string) {
   if (value.includes("monitor")) return "monitor";
   if (value.includes("inspect")) return "inspect";
   return "other";
+}
+
+function currencyToMinor(value: string) {
+  if (!value) return null;
+  const [whole, fraction = ""] = value.split(".");
+  return Number(whole) * 100 + Number(fraction.padEnd(2, "0"));
 }
 
 async function requireUser() {
@@ -220,6 +242,67 @@ export async function recordReviewUpdateAction(input: {
       note: event.note ?? "",
       createdAt: event.created_at,
     },
+  };
+}
+
+export async function completeWorkItemAction(input: WorkCompletionInput): Promise<WorkCompletionResult> {
+  const values = completionSchema.parse(input);
+  const { supabase } = await requireUser();
+  const { data: completion, error: completionError } = await supabase.rpc("complete_work_item", {
+    target_work_item_id: values.workItemId,
+    service_performed_on: values.performedOn,
+    service_vendor_name: values.vendorName || null,
+    service_cost_minor: currencyToMinor(values.cost),
+    service_note: values.note || null,
+    service_warranty_ends_on: values.warrantyEndsOn || null,
+    next_recurrence_months: values.recurrenceMonths,
+  });
+  if (completionError) throw new Error(completionError.message);
+
+  const result = completion as { service_record_id?: string; next_service_on?: string } | null;
+  if (!result?.service_record_id) throw new Error("The completion was saved without a service record identifier.");
+
+  const [{ data: serviceRecord, error: serviceError }, { data: event, error: eventError }] = await Promise.all([
+    supabase
+      .from("service_records")
+      .select("id,performed_on,description,vendor_name,cost_minor,currency,warranty_ends_on,recurrence_months,next_service_on")
+      .eq("id", result.service_record_id)
+      .single(),
+    supabase
+      .from("activity_events")
+      .select("id,status_to,note,created_at")
+      .eq("work_item_id", values.workItemId)
+      .eq("event_type", "service_recorded")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single(),
+  ]);
+  if (serviceError) throw new Error(serviceError.message);
+  if (eventError) throw new Error(eventError.message);
+
+  revalidatePath("/");
+  return {
+    status: "completed",
+    activity: {
+      id: event.id,
+      reportId: values.reportId,
+      status: databaseStatusToReview(event.status_to),
+      note: event.note ?? "",
+      createdAt: event.created_at,
+    },
+    serviceRecord: {
+      id: serviceRecord.id,
+      reportId: values.reportId,
+      performedOn: serviceRecord.performed_on,
+      description: serviceRecord.description,
+      vendorName: serviceRecord.vendor_name,
+      costMinor: serviceRecord.cost_minor === null ? null : Number(serviceRecord.cost_minor),
+      currency: serviceRecord.currency,
+      warrantyEndsOn: serviceRecord.warranty_ends_on,
+      recurrenceMonths: serviceRecord.recurrence_months,
+      nextServiceOn: serviceRecord.next_service_on,
+    },
+    nextServiceOn: serviceRecord.next_service_on,
   };
 }
 

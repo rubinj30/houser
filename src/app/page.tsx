@@ -18,6 +18,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ a
       userEmail={workspace.userEmail}
       initialReviewStatuses={workspace.reviewStatuses}
       initialReviewActivities={workspace.reviewActivities}
+      initialServiceRecords={workspace.serviceRecords}
     />
   );
 }
