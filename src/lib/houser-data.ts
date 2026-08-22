@@ -15,6 +15,11 @@ type WorkItemRow = {
   priority: Finding["priority"];
   source_location: string | null;
   source_page_numbers: number[] | null;
+  source_document_id: string | null;
+  source_section: string | null;
+  source_category: string | null;
+  source_severity: Finding["severity"] | null;
+  source_excerpt: string | null;
   categories: { name: string } | { name: string }[] | null;
   areas: { name: string } | { name: string }[] | null;
 };
@@ -24,7 +29,7 @@ type ActivityRow = {
   status_to: string | null;
   note: string | null;
   created_at: string;
-  work_items: { source_key: string | null } | { source_key: string | null }[] | null;
+  work_items: { source_key: string | null; source_section: string | null } | { source_key: string | null; source_section: string | null }[] | null;
 };
 
 type ServiceRecordRow = {
@@ -37,7 +42,7 @@ type ServiceRecordRow = {
   warranty_ends_on: string | null;
   recurrence_months: number | null;
   next_service_on: string | null;
-  work_items: { source_key: string | null } | { source_key: string | null }[] | null;
+  work_items: { source_key: string | null; source_section: string | null } | { source_key: string | null; source_section: string | null }[] | null;
 };
 
 function relatedName(value: WorkItemRow["categories"] | WorkItemRow["areas"], fallback: string) {
@@ -46,24 +51,26 @@ function relatedName(value: WorkItemRow["categories"] | WorkItemRow["areas"], fa
 }
 
 function relatedSourceKey(value: ActivityRow["work_items"]) {
-  if (Array.isArray(value)) return value[0]?.source_key ?? null;
-  return value?.source_key ?? null;
+  if (Array.isArray(value)) return value[0]?.source_section ?? value[0]?.source_key ?? null;
+  return value?.source_section ?? value?.source_key ?? null;
 }
 
-function manualFinding(row: WorkItemRow): Finding {
+function databaseFinding(row: WorkItemRow): Finding {
   const area = relatedName(row.areas, row.source_location ?? "General");
   return {
     workItemId: row.id,
-    reportId: row.source_key ?? `manual-${row.id}`,
+    reportId: row.source_section ?? row.source_key ?? `manual-${row.id}`,
     title: row.title,
-    category: relatedName(row.categories, "General"),
+    category: row.source_category ?? relatedName(row.categories, "General"),
     area,
     workType: row.work_type,
-    severity: "recommendation",
+    severity: row.source_severity ?? "recommendation",
     priority: row.priority,
     location: row.source_location ?? area,
     suggestedAction: row.description ?? "Review this work item and add scheduling details.",
     sourcePages: row.source_page_numbers ?? [],
+    sourceDocumentId: row.source_document_id ?? undefined,
+    sourceExcerpt: row.source_excerpt ?? undefined,
   };
 }
 
@@ -109,19 +116,19 @@ export async function getHouserWorkspace(): Promise<HouserWorkspace | null> {
   ] = await Promise.all([
     supabase
       .from("work_items")
-      .select("id, source_key, title, description, work_type, status, priority, source_location, source_page_numbers, categories(name), areas(name)")
+      .select("id, source_key, title, description, work_type, status, priority, source_location, source_page_numbers, source_document_id, source_section, source_category, source_severity, source_excerpt, categories(name), areas(name)")
       .eq("property_id", property.id)
       .is("archived_at", null)
       .order("created_at"),
     supabase
       .from("activity_events")
-      .select("id, status_to, note, created_at, work_items(source_key)")
+      .select("id, status_to, note, created_at, work_items(source_key,source_section)")
       .eq("property_id", property.id)
       .in("event_type", ["status_change", "service_recorded"])
       .order("created_at", { ascending: false }),
     supabase
       .from("service_records")
-      .select("id, performed_on, description, vendor_name, cost_minor, currency, warranty_ends_on, recurrence_months, next_service_on, work_items!service_records_work_item_id_fkey(source_key)")
+      .select("id, performed_on, description, vendor_name, cost_minor, currency, warranty_ends_on, recurrence_months, next_service_on, work_items!service_records_work_item_id_fkey(source_key,source_section)")
       .eq("property_id", property.id)
       .order("performed_on", { ascending: false }),
   ]);
@@ -131,14 +138,10 @@ export async function getHouserWorkspace(): Promise<HouserWorkspace | null> {
   if (servicesError) throw new Error(`Could not load Houser service history: ${servicesError.message}`);
 
   const seed = inspectionSeed as InspectionSeed;
-  const seedByReportId = new Map(seed.findings.map((finding) => [finding.reportId, finding]));
   const rows = (workItems ?? []) as WorkItemRow[];
-  const findings = rows.map((row) => {
-    const seeded = row.source_key ? seedByReportId.get(row.source_key) : undefined;
-    return seeded ? { ...seeded, workItemId: row.id } : manualFinding(row);
-  });
+  const findings = rows.map(databaseFinding);
   const reviewStatuses = Object.fromEntries(
-    rows.map((row) => [row.source_key ?? `manual-${row.id}`, databaseStatusToReview(row.status)]),
+    rows.map((row) => [row.source_section ?? row.source_key ?? `manual-${row.id}`, databaseStatusToReview(row.status)]),
   ) as Record<string, ReviewStatus>;
   const reviewActivities = ((activities ?? []) as ActivityRow[]).flatMap<ReviewActivity>((activity) => {
     const sourceKey = relatedSourceKey(activity.work_items);

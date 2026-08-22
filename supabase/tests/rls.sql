@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(18);
+select plan(30);
 
 insert into auth.users (
   instance_id, id, aud, role, email, encrypted_password,
@@ -111,12 +111,86 @@ select results_eq(
   'completion writes an auditable service event'
 );
 
+select lives_ok(
+  $$ insert into public.documents (id, property_id, document_type, original_filename, mime_type, byte_size, storage_key, status, uploaded_by) values ('a3000000-0000-0000-0000-000000000003', 'a1000000-0000-0000-0000-000000000001', 'inspection', 'inspection.pdf', 'application/pdf', 1234, 'a1000000-0000-0000-0000-000000000001/2026/a3000000-0000-0000-0000-000000000003/original.pdf', 'review_ready', '10000000-0000-0000-0000-000000000001') $$,
+  'an owner can create a private inspection document'
+);
+
+select lives_ok(
+  $$ insert into public.extraction_runs (id, document_id, property_id, model, status, result, created_by) values ('a4000000-0000-0000-0000-000000000004', 'a3000000-0000-0000-0000-000000000003', 'a1000000-0000-0000-0000-000000000001', 'test-model', 'review_ready', '{"findings":[{"sourceSection":"10.4.1","title":"Clean fireplace flue","category":"Interior","area":"Living Room","location":"Fireplace","workType":"maintain","severity":"recommendation","priority":"important","recommendation":"Have the flue evaluated and cleaned.","sourcePages":[42],"sourceExcerpt":"Evaluate and clean before use."},{"sourceSection":"5.1.4","title":"Terminate loose wiring","category":"Electrical","area":"Kitchen","location":"Under kitchen sink","workType":"repair","severity":"safety_hazard","priority":"urgent","recommendation":"Use a proper junction box.","sourcePages":[17],"sourceExcerpt":"Loose wiring was observed."}]}', '10000000-0000-0000-0000-000000000001') $$,
+  'an owner can stage a structured extraction'
+);
+
+select results_eq(
+  $$ select count(*)::bigint from public.extraction_runs $$,
+  array[1::bigint],
+  'an owner can read their extraction run'
+);
+
+select lives_ok(
+  $$ insert into storage.objects (bucket_id, name, owner_id) values ('documents', 'a1000000-0000-0000-0000-000000000001/2026/a3000000-0000-0000-0000-000000000003/original.pdf', '10000000-0000-0000-0000-000000000001') $$,
+  'an owner can write a PDF object within their property prefix'
+);
+
+insert into public.work_items (id, property_id, source_key, title, source_type, status, created_by)
+values
+  ('a5000000-0000-0000-0000-000000000005', 'a1000000-0000-0000-0000-000000000001', '10.4.1', 'Preserved fireplace', 'inspection', 'planned', '10000000-0000-0000-0000-000000000001'),
+  ('a6000000-0000-0000-0000-000000000006', 'a1000000-0000-0000-0000-000000000001', 'old.1', 'Stale inspection finding', 'inspection', 'inbox', '10000000-0000-0000-0000-000000000001');
+
+select lives_ok(
+  $$ select public.accept_inspection_extraction('a4000000-0000-0000-0000-000000000004', true, '10.4.1') $$,
+  'an owner can atomically accept an inspection extraction'
+);
+
+select results_eq(
+  $$ select status from public.work_items where id = 'a5000000-0000-0000-0000-000000000005' $$,
+  array['planned'::text],
+  'the explicitly preserved finding keeps its review status'
+);
+
+select results_eq(
+  $$ select count(*)::bigint from public.work_items where id = 'a6000000-0000-0000-0000-000000000006' $$,
+  array[0::bigint],
+  'replacement removes stale inspection findings'
+);
+
+select results_eq(
+  $$ select status from public.work_items where source_section = '5.1.4' $$,
+  array['inbox'::text],
+  'newly extracted findings require owner review'
+);
+
+select results_eq(
+  $$ select count(*)::bigint from public.work_items where id = 'a1100000-0000-0000-0000-000000000001' $$,
+  array[1::bigint],
+  'replacement does not remove manual work'
+);
+
 select set_config('request.jwt.claims', '{"sub":"20000000-0000-0000-0000-000000000002","role":"authenticated"}', true);
 
 select results_eq(
   $$ select display_name from public.properties order by display_name $$,
   array['Property B'::text],
   'the second account is isolated from the first'
+);
+
+select results_eq(
+  $$ select count(*)::bigint from public.extraction_runs $$,
+  array[0::bigint],
+  'another account cannot read inspection extraction results'
+);
+
+select results_eq(
+  $$ select count(*)::bigint from storage.objects where bucket_id = 'documents' $$,
+  array[0::bigint],
+  'another account cannot read private inspection objects'
+);
+
+select throws_ok(
+  $$ select public.accept_inspection_extraction('a4000000-0000-0000-0000-000000000004', false, null) $$,
+  'P0001',
+  null,
+  'another account cannot import the first account inspection'
 );
 
 select throws_ok(

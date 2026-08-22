@@ -14,6 +14,8 @@ export type Finding = {
   location: string;
   suggestedAction: string;
   sourcePages: number[];
+  sourceDocumentId?: string;
+  sourceExcerpt?: string;
 };
 
 export type Asset = {

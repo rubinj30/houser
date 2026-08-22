@@ -30,12 +30,15 @@ import {
   ShieldAlert,
   Sparkles,
   Trees,
+  Upload,
   Wrench,
   X,
   type LucideIcon,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { completeWorkItemAction, createManualWorkItemAction, recordReviewUpdateAction, signOutAction } from "@/app/actions";
+import { createClient as createBrowserClient } from "@/lib/supabase/client";
+import type { InspectionExtraction } from "@/lib/inspection-extraction";
 import {
   countBySeverity,
   filterFindings,
@@ -83,6 +86,7 @@ export function HouserApp({ seed, propertyId, userEmail, initialReviewStatuses, 
   const [activeView, setActiveView] = useState<View>("home");
   const [property, setProperty] = useState<"ivy" | "rental">("ivy");
   const [isAdding, setIsAdding] = useState(false);
+  const [isUploadingInspection, setIsUploadingInspection] = useState(false);
   const [localItems, setLocalItems] = useState<LocalWorkItem[]>([]);
   const [reviewStatuses, setReviewStatuses] = useState(initialReviewStatuses);
   const [reviewActivities, setReviewActivities] = useState(initialReviewActivities);
@@ -131,12 +135,12 @@ export function HouserApp({ seed, propertyId, userEmail, initialReviewStatuses, 
     <div className="min-h-dvh lg:grid lg:grid-cols-[248px_1fr]">
       <DesktopSidebar activeView={activeView} workCount={allFindings.length} userEmail={userEmail} onChangeView={changeView} />
       <div className="min-w-0 pb-24 lg:pb-0">
-        <TopBar property={property} userEmail={userEmail} setProperty={setProperty} onAdd={() => setIsAdding(true)} />
+        <TopBar property={property} userEmail={userEmail} setProperty={setProperty} onAdd={() => setIsAdding(true)} onUpload={() => setIsUploadingInspection(true)} />
         <main className="mx-auto w-full max-w-[1500px] px-4 pb-10 pt-5 sm:px-6 lg:px-10 lg:pb-14 lg:pt-8">
           {property === "rental" ? (
             <EmptyRental onSwitch={() => setProperty("ivy")} />
           ) : activeView === "home" ? (
-            <HomeView seed={seed} findings={allFindings} onOpenWork={openWork} />
+            <HomeView seed={seed} findings={allFindings} onOpenWork={openWork} onUpload={() => setIsUploadingInspection(true)} />
           ) : activeView === "work" ? (
             <WorkView key={workIntent.revision} findings={allFindings} initialCategory={workIntent.category} initialSeverity={workIntent.severity} initialSelectedReportId={workIntent.selectedReportId} reviewStatuses={reviewStatuses} reviewActivities={reviewActivities} serviceRecords={serviceRecords} onRecordReview={recordReviewUpdate} onCompleteWork={completeWorkItem} />
           ) : activeView === "timeline" ? (
@@ -151,6 +155,7 @@ export function HouserApp({ seed, propertyId, userEmail, initialReviewStatuses, 
         <AddWorkDialog
           seed={seed}
           onClose={() => setIsAdding(false)}
+          onUpload={() => { setIsAdding(false); setIsUploadingInspection(true); }}
           onAdd={async (item) => {
             const created = await createManualWorkItemAction({ propertyId, title: item.title, category: item.category, area: item.area });
             setLocalItems((items) => [created, ...items]);
@@ -158,6 +163,7 @@ export function HouserApp({ seed, propertyId, userEmail, initialReviewStatuses, 
           }}
         />
       ) : null}
+      {isUploadingInspection ? <InspectionUploadDialog propertyId={propertyId} onClose={() => setIsUploadingInspection(false)} /> : null}
     </div>
   );
 }
@@ -211,13 +217,13 @@ function DesktopSidebar({ activeView, workCount, userEmail, onChangeView }: { ac
   );
 }
 
-function TopBar({ property, userEmail, setProperty, onAdd }: { property: "ivy" | "rental"; userEmail: string; setProperty: (property: "ivy" | "rental") => void; onAdd: () => void }) {
+function TopBar({ property, userEmail, setProperty, onAdd, onUpload }: { property: "ivy" | "rental"; userEmail: string; setProperty: (property: "ivy" | "rental") => void; onAdd: () => void; onUpload: () => void }) {
   return (
     <header className="sticky top-0 z-30 border-b border-black/6 bg-[rgba(243,241,235,0.88)] px-4 py-3 backdrop-blur-xl sm:px-6 lg:px-10">
       <div className="mx-auto flex max-w-[1500px] items-center justify-between gap-3">
         <div className="lg:hidden"><div className="flex items-center gap-2"><div className="grid size-9 place-items-center rounded-xl bg-[var(--forest-dark)] text-[var(--lime)]"><Home className="size-[18px]" /></div><span className="font-display text-lg font-extrabold tracking-tight">Houser</span></div></div>
         <PropertySelect property={property} setProperty={setProperty} className="hidden sm:block" />
-        <div className="flex items-center gap-2"><form action={signOutAction} className="lg:hidden"><button type="submit" aria-label={`Sign out ${userEmail}`} className="grid size-11 place-items-center rounded-xl border border-black/8 bg-white/65 text-[var(--muted)]"><LogOut className="size-[18px]" /></button></form><button type="button" onClick={onAdd} className="hidden min-h-11 items-center gap-2 rounded-xl bg-[var(--forest)] px-4 text-sm font-bold text-white shadow-lg shadow-[#214f3e]/15 transition hover:-translate-y-0.5 hover:bg-[var(--forest-dark)] sm:flex"><Plus className="size-[18px]" /> Add work</button></div>
+        <div className="flex items-center gap-2"><form action={signOutAction} className="lg:hidden"><button type="submit" aria-label={`Sign out ${userEmail}`} className="grid size-11 place-items-center rounded-xl border border-black/8 bg-white/65 text-[var(--muted)]"><LogOut className="size-[18px]" /></button></form><button type="button" onClick={onUpload} className="hidden min-h-11 items-center gap-2 rounded-xl border border-black/8 bg-white/70 px-4 text-sm font-bold text-[var(--forest)] sm:flex"><Upload className="size-[18px]" /> Upload inspection</button><button type="button" onClick={onAdd} className="hidden min-h-11 items-center gap-2 rounded-xl bg-[var(--forest)] px-4 text-sm font-bold text-white shadow-lg shadow-[#214f3e]/15 transition hover:-translate-y-0.5 hover:bg-[var(--forest-dark)] sm:flex"><Plus className="size-[18px]" /> Add work</button></div>
       </div>
       <PropertySelect property={property} setProperty={setProperty} className="mt-3 block sm:hidden" full />
     </header>
@@ -237,7 +243,7 @@ function PropertySelect({ property, setProperty, className, full = false }: { pr
   );
 }
 
-function HomeView({ seed, findings, onOpenWork }: { seed: InspectionSeed; findings: Finding[]; onOpenWork: (intent?: Partial<Omit<WorkIntent, "revision">>) => void }) {
+function HomeView({ seed, findings, onOpenWork, onUpload }: { seed: InspectionSeed; findings: Finding[]; onOpenWork: (intent?: Partial<Omit<WorkIntent, "revision">>) => void; onUpload: () => void }) {
   const counts = countBySeverity(findings);
   const categories = groupByCategory(findings).slice(0, 6);
   const safetyItems = findings.filter((item) => item.severity === "safety_hazard").slice(0, 4);
@@ -269,7 +275,7 @@ function HomeView({ seed, findings, onOpenWork }: { seed: InspectionSeed; findin
                 <h2 className="font-display mt-4 max-w-lg text-2xl font-extrabold leading-tight tracking-[-0.04em] sm:text-3xl">Turn the Sample Home report into your working plan.</h2>
                 <p className="mt-3 max-w-xl text-sm leading-6 text-white/65">Every finding keeps its page reference. Review what is still relevant, attach report captures, and record anything already completed.</p>
               </div>
-              <button type="button" onClick={() => onOpenWork()} className="mt-6 flex min-h-11 w-fit items-center gap-2 rounded-xl bg-[var(--lime)] px-4 text-sm font-extrabold text-[var(--forest-dark)] transition hover:brightness-105">Start review <ArrowRight className="size-4" /></button>
+              <div className="mt-6 flex flex-wrap gap-2"><button type="button" onClick={() => onOpenWork()} className="flex min-h-11 w-fit items-center gap-2 rounded-xl bg-[var(--lime)] px-4 text-sm font-extrabold text-[var(--forest-dark)] transition hover:brightness-105">Start review <ArrowRight className="size-4" /></button><button type="button" onClick={onUpload} className="flex min-h-11 items-center gap-2 rounded-xl border border-white/20 px-4 text-sm font-extrabold text-white hover:bg-white/10"><Upload className="size-4" /> Upload inspection</button></div>
             </div>
             <ReportIllustration />
           </div>
@@ -416,7 +422,7 @@ function FindingReviewDialog({ item, status, activities, serviceRecords, initial
         <div className="space-y-6 p-5 sm:p-7">
           <section><p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--muted)]">Inspector recommendation</p><p className="mt-2 text-sm leading-6">{item.suggestedAction}</p></section>
           <dl className="grid grid-cols-2 gap-3"><Detail label="Area" value={item.area} /><Detail label="Location" value={item.location} icon={MapPin} /><Detail label="Priority" value={item.priority} /><Detail label="Work type" value={item.workType} /></dl>
-          <section className="rounded-[22px] border border-black/7 bg-white/65 p-4"><div className="flex items-start gap-3"><div className="grid size-10 shrink-0 place-items-center rounded-xl bg-[var(--mint)] text-[var(--forest)]"><ImageIcon className="size-[18px]"/></div><div><p className="text-xs font-extrabold">Inspection evidence</p><p className="mt-1 text-sm font-bold text-[var(--forest)]">{item.sourcePages.length ? formatSourcePages(item.sourcePages) : "Manual entry"}</p><p className="mt-2 text-xs leading-5 text-[var(--muted)]">The source reference is preserved. The original page capture will appear here after private document storage is connected.</p></div></div></section>
+          <section className="rounded-[22px] border border-black/7 bg-white/65 p-4"><div className="flex items-start gap-3"><div className="grid size-10 shrink-0 place-items-center rounded-xl bg-[var(--mint)] text-[var(--forest)]"><ImageIcon className="size-[18px]"/></div><div className="min-w-0"><p className="text-xs font-extrabold">Inspection evidence</p>{item.sourceDocumentId && item.sourcePages[0] ? <a href={`/api/documents/${item.sourceDocumentId}/view?page=${item.sourcePages[0]}`} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-sm font-extrabold text-[var(--forest)] hover:underline">View original report · {formatSourcePages(item.sourcePages)} <ArrowRight className="size-3" /></a> : <p className="mt-1 text-sm font-bold text-[var(--forest)]">{item.sourcePages.length ? formatSourcePages(item.sourcePages) : "Manual entry"}</p>}{item.sourceExcerpt ? <p className="mt-2 text-xs leading-5 text-[var(--muted)]">“{item.sourceExcerpt}”</p> : <p className="mt-2 text-xs leading-5 text-[var(--muted)]">{item.sourceDocumentId ? "The original private report opens at the referenced page." : "No uploaded source document is linked yet."}</p>}</div></div></section>
           <section>
             <p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--muted)]">Owner review</p>
             <p className="mt-2 text-sm leading-6 text-[var(--muted)]">Confirm the current condition before turning this historical inspection finding into active work.</p>
@@ -542,7 +548,86 @@ function EmptyRental({ onSwitch }: { onSwitch: () => void }) {
   return <div className="mx-auto mt-8 max-w-xl rounded-[28px] border border-dashed border-black/15 bg-white/50 p-8 text-center sm:p-12"><div className="mx-auto grid size-14 place-items-center rounded-[20px] bg-[var(--mint)] text-[var(--forest)]"><Home className="size-6"/></div><h1 className="font-display mt-5 text-2xl font-extrabold tracking-tight">Set up the rental property</h1><p className="mt-3 text-sm leading-6 text-[var(--muted)]">When you share the second inspection report, this property can be seeded the same way as Sample Home.</p><button type="button" onClick={onSwitch} className="mt-6 min-h-11 rounded-xl bg-[var(--forest)] px-5 text-sm font-extrabold text-white">Return to Sample Home</button></div>;
 }
 
-function AddWorkDialog({ seed, onClose, onAdd }: { seed: InspectionSeed; onClose: () => void; onAdd: (item: LocalWorkItem) => Promise<void> }) {
+type UploadPhase = "select" | "uploading" | "analyzing" | "review" | "importing";
+
+function InspectionUploadDialog({ propertyId, onClose }: { propertyId: string; onClose: () => void }) {
+  const [file, setFile] = useState<File | null>(null);
+  const [phase, setPhase] = useState<UploadPhase>("select");
+  const [result, setResult] = useState<(InspectionExtraction & { documentId: string; runId: string }) | null>(null);
+  const [replaceExisting, setReplaceExisting] = useState(true);
+  const [error, setError] = useState("");
+
+  const uploadAndAnalyze = async () => {
+    if (!file) return;
+    setError("");
+    if (file.type !== "application/pdf" || file.size > 52_428_800) {
+      setError("Choose a PDF smaller than 50 MB.");
+      return;
+    }
+    const signature = new TextDecoder().decode(await file.slice(0, 5).arrayBuffer());
+    if (signature !== "%PDF-") {
+      setError("This file does not appear to be a valid PDF.");
+      return;
+    }
+
+    try {
+      setPhase("uploading");
+      const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+      const sha256 = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+      const intentResponse = await fetch("/api/documents/upload-intent", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ propertyId, filename: file.name, mimeType: file.type, byteSize: file.size, sha256 }),
+      });
+      const intent = await intentResponse.json();
+      if (!intentResponse.ok) throw new Error(intent.error ?? "Could not prepare the upload.");
+
+      const supabase = createBrowserClient();
+      const { error: uploadError } = await supabase.storage.from("documents").uploadToSignedUrl(intent.storageKey, intent.token, file, { contentType: "application/pdf" });
+      if (uploadError) throw uploadError;
+
+      setPhase("analyzing");
+      const processResponse = await fetch(`/api/documents/${intent.documentId}/process`, { method: "POST" });
+      const processed = await processResponse.json();
+      if (!processResponse.ok) throw new Error(processed.error ?? "The inspection could not be analyzed.");
+      setResult({ ...processed, schemaVersion: 1 });
+      setPhase("review");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "The inspection could not be uploaded.");
+      setPhase("select");
+    }
+  };
+
+  const importFindings = async () => {
+    if (!result) return;
+    setError("");
+    setPhase("importing");
+    try {
+      const response = await fetch(`/api/documents/${result.documentId}/import`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ runId: result.runId, replaceExisting, preserveSection: replaceExisting ? "10.4.1" : null }),
+      });
+      const imported = await response.json();
+      if (!response.ok) throw new Error(imported.error ?? "The findings could not be imported.");
+      window.location.reload();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "The findings could not be imported.");
+      setPhase("review");
+    }
+  };
+
+  const busy = phase === "uploading" || phase === "analyzing" || phase === "importing";
+  return <div className="fixed inset-0 z-50 grid items-end bg-[#0d1e17]/45 p-0 backdrop-blur-sm sm:place-items-center sm:p-6" role="presentation" onMouseDown={(event) => { if (!busy && event.currentTarget === event.target) onClose(); }}><section role="dialog" aria-modal="true" aria-labelledby="inspection-upload-title" className="max-h-[94dvh] w-full overflow-y-auto rounded-t-[28px] bg-[var(--paper)] p-5 shadow-2xl sm:max-w-xl sm:rounded-[28px] sm:p-7"><div className="flex items-start justify-between gap-4"><div><p className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-[var(--forest)]">Private document import</p><h2 id="inspection-upload-title" className="font-display mt-1 text-2xl font-extrabold tracking-tight">Upload inspection</h2><p className="mt-2 text-sm leading-6 text-[var(--muted)]">Houser securely stores the PDF, uses OpenAI to propose work items, and waits for your approval before changing the work list.</p></div><button type="button" onClick={onClose} disabled={busy} className="grid size-10 shrink-0 place-items-center rounded-xl bg-black/5 disabled:opacity-40" aria-label="Close"><X className="size-5"/></button></div>
+    {phase === "select" ? <div className="mt-6"><label className="flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-[20px] border border-dashed border-[var(--forest)]/25 bg-white/55 p-5 text-center"><Upload className="size-7 text-[var(--forest)]"/><span className="mt-3 text-sm font-extrabold">Choose inspection PDF</span><span className="mt-1 max-w-sm text-xs leading-5 text-[var(--muted)]">PDF only · up to 50 MB · visible only to household members</span><input type="file" accept="application/pdf,.pdf" className="sr-only" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /></label>{file ? <div className="mt-3 flex items-center justify-between gap-3 rounded-xl bg-[var(--mint)]/45 px-4 py-3"><div className="min-w-0"><p className="truncate text-xs font-extrabold">{file.name}</p><p className="mt-0.5 text-[10px] text-[var(--muted)]">{(file.size / 1_048_576).toFixed(1)} MB</p></div><CheckCircle2 className="size-5 shrink-0 text-[var(--forest)]"/></div> : null}<button type="button" onClick={uploadAndAnalyze} disabled={!file} className="mt-4 min-h-12 w-full rounded-xl bg-[var(--forest)] text-sm font-extrabold text-white disabled:opacity-40">Upload & analyze</button></div> : null}
+    {phase === "uploading" || phase === "analyzing" ? <div className="mt-8 rounded-[20px] bg-[var(--mint)]/45 p-6 text-center"><Sparkles className="mx-auto size-7 animate-pulse text-[var(--forest)]"/><h3 className="mt-3 text-sm font-extrabold">{phase === "uploading" ? "Uploading privately…" : "Reading the inspection…"}</h3><p className="mt-2 text-xs leading-5 text-[var(--muted)]">{phase === "uploading" ? "The original report is going into private document storage." : "A full report can take a few minutes. Keep this window open."}</p></div> : null}
+    {phase === "review" && result ? <div className="mt-6"><div className="rounded-[20px] bg-[var(--mint)]/55 p-4"><div className="flex items-center gap-3"><CheckCircle2 className="size-6 text-[var(--forest)]"/><div><p className="text-sm font-extrabold">{result.findings.length} findings proposed</p><p className="mt-0.5 text-xs text-[var(--muted)]">{result.report.propertyAddress ?? "Inspection report"} · {result.report.pageCount} pages</p></div></div></div>{result.reviewWarnings.length ? <div className="mt-3 rounded-xl bg-[#f9e6c8] p-3 text-xs leading-5 text-[#6f4c1d]">{result.reviewWarnings.join(" ")}</div> : null}<div className="mt-4 max-h-56 space-y-2 overflow-y-auto pr-1">{result.findings.slice(0, 12).map((finding) => <div key={finding.sourceSection} className="rounded-xl border border-black/6 bg-white/65 p-3"><div className="flex justify-between gap-3"><p className="text-xs font-extrabold">{finding.title}</p><span className="shrink-0 text-[10px] font-bold text-[var(--forest)]">{finding.sourceSection}</span></div><p className="mt-1 text-[10px] text-[var(--muted)]">{finding.category} · {formatSourcePages(finding.sourcePages)}</p></div>)}{result.findings.length > 12 ? <p className="py-2 text-center text-xs font-bold text-[var(--muted)]">Plus {result.findings.length - 12} more findings</p> : null}</div><label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-black/8 bg-white/60 p-4"><input type="checkbox" checked={replaceExisting} onChange={(event) => setReplaceExisting(event.target.checked)} className="mt-0.5 size-4 accent-[var(--forest)]"/><span><span className="block text-xs font-extrabold">Replace earlier inspection findings</span><span className="mt-1 block text-[11px] leading-5 text-[var(--muted)]">Removes older inspection-generated items, keeps manual work, and preserves section 10.4.1 with its status and history.</span></span></label><div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><button type="button" onClick={onClose} className="min-h-11 rounded-xl px-4 text-xs font-extrabold text-[var(--muted)]">Cancel</button><button type="button" onClick={importFindings} className="min-h-11 rounded-xl bg-[var(--forest)] px-5 text-xs font-extrabold text-white">Approve & import findings</button></div></div> : null}
+    {phase === "importing" ? <div className="mt-8 rounded-[20px] bg-[var(--mint)]/45 p-6 text-center"><Sparkles className="mx-auto size-7 animate-pulse text-[var(--forest)]"/><h3 className="mt-3 text-sm font-extrabold">Updating the work list…</h3><p className="mt-2 text-xs text-[var(--muted)]">The replacement is performed as one database transaction.</p></div> : null}
+    {error ? <p role="alert" className="mt-4 rounded-xl bg-[#f8ddd7] px-3 py-2 text-xs font-bold leading-5 text-[#8c3328]">{error}</p> : null}
+  </section></div>;
+}
+
+function AddWorkDialog({ seed, onClose, onAdd, onUpload }: { seed: InspectionSeed; onClose: () => void; onAdd: (item: LocalWorkItem) => Promise<void>; onUpload: () => void }) {
   const categories = [...new Set(seed.findings.map((item) => item.category))].sort();
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState(categories[0] ?? "General");
@@ -565,5 +650,5 @@ function AddWorkDialog({ seed, onClose, onAdd }: { seed: InspectionSeed; onClose
     }
   };
 
-  return <div className="fixed inset-0 z-50 grid items-end bg-[#0d1e17]/45 p-0 backdrop-blur-sm sm:place-items-center sm:p-6" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}><div role="dialog" aria-modal="true" aria-labelledby="add-work-title" className="w-full rounded-t-[28px] bg-[var(--paper)] p-5 shadow-2xl sm:max-w-lg sm:rounded-[28px] sm:p-7"><div className="flex items-start justify-between"><div><p className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-[var(--forest)]">Quick capture</p><h2 id="add-work-title" className="font-display mt-1 text-2xl font-extrabold tracking-tight">Add work</h2></div><button type="button" onClick={onClose} className="grid size-10 place-items-center rounded-xl bg-black/5" aria-label="Close"><X className="size-5"/></button></div><form onSubmit={submit} className="mt-6 space-y-4"><label className="block"><span className="text-xs font-extrabold">What needs to be done?</span><input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Service upstairs furnace" className="mt-2 h-12 w-full rounded-xl border border-black/10 bg-white px-4 text-sm"/></label><div className="grid gap-4 sm:grid-cols-2"><label><span className="text-xs font-extrabold">Category</span><select value={category} onChange={(event) => setCategory(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-black/10 bg-white px-3 text-sm">{categories.map((name) => <option key={name}>{name}</option>)}</select></label><label><span className="text-xs font-extrabold">Area</span><select value={area} onChange={(event) => setArea(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-black/10 bg-white px-3 text-sm">{seed.areas.map((name) => <option key={name}>{name}</option>)}</select></label></div><button type="button" className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-dashed border-black/15 text-sm font-bold text-[var(--muted)]"><Camera className="size-[18px]"/> Add photo or screenshot</button>{saveError ? <p role="alert" className="rounded-xl bg-[#f8ddd7] px-3 py-2 text-xs font-bold text-[#8c3328]">{saveError}</p> : null}<button type="submit" disabled={!title.trim() || isSaving} className="min-h-12 w-full rounded-xl bg-[var(--forest)] text-sm font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-40">{isSaving ? "Saving…" : "Save to work inbox"}</button></form></div></div>;
+  return <div className="fixed inset-0 z-50 grid items-end bg-[#0d1e17]/45 p-0 backdrop-blur-sm sm:place-items-center sm:p-6" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}><div role="dialog" aria-modal="true" aria-labelledby="add-work-title" className="w-full rounded-t-[28px] bg-[var(--paper)] p-5 shadow-2xl sm:max-w-lg sm:rounded-[28px] sm:p-7"><div className="flex items-start justify-between"><div><p className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-[var(--forest)]">Quick capture</p><h2 id="add-work-title" className="font-display mt-1 text-2xl font-extrabold tracking-tight">Add work</h2></div><button type="button" onClick={onClose} className="grid size-10 place-items-center rounded-xl bg-black/5" aria-label="Close"><X className="size-5"/></button></div><button type="button" onClick={onUpload} className="mt-5 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-[var(--forest)]/20 bg-[var(--mint)]/50 text-sm font-extrabold text-[var(--forest)]"><Upload className="size-[18px]" /> Upload an inspection PDF</button><div className="my-5 flex items-center gap-3 text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--muted)]"><span className="h-px flex-1 bg-black/8" />or add one item<span className="h-px flex-1 bg-black/8" /></div><form onSubmit={submit} className="space-y-4"><label className="block"><span className="text-xs font-extrabold">What needs to be done?</span><input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Service upstairs furnace" className="mt-2 h-12 w-full rounded-xl border border-black/10 bg-white px-4 text-sm"/></label><div className="grid gap-4 sm:grid-cols-2"><label><span className="text-xs font-extrabold">Category</span><select value={category} onChange={(event) => setCategory(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-black/10 bg-white px-3 text-sm">{categories.map((name) => <option key={name}>{name}</option>)}</select></label><label><span className="text-xs font-extrabold">Area</span><select value={area} onChange={(event) => setArea(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-black/10 bg-white px-3 text-sm">{seed.areas.map((name) => <option key={name}>{name}</option>)}</select></label></div><button type="button" className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-dashed border-black/15 text-sm font-bold text-[var(--muted)]"><Camera className="size-[18px]"/> Add photo or screenshot</button>{saveError ? <p role="alert" className="rounded-xl bg-[#f8ddd7] px-3 py-2 text-xs font-bold text-[#8c3328]">{saveError}</p> : null}<button type="submit" disabled={!title.trim() || isSaving} className="min-h-12 w-full rounded-xl bg-[var(--forest)] text-sm font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-40">{isSaving ? "Saving…" : "Save to work inbox"}</button></form></div></div>;
 }
