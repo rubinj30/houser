@@ -23,7 +23,7 @@ const manualWorkSchema = z.object({
   area: z.string().trim().min(1).max(120),
 });
 
-const magicLinkSchema = z.object({ email: z.email() });
+const magicLinkSchema = z.object({ email: z.email(), origin: z.url().optional() });
 const evidenceRequestSchema = z.object({ workItemId: z.uuid() });
 
 function requestSiteUrl(requestHeaders: Headers) {
@@ -84,8 +84,8 @@ async function requireUser() {
   return { supabase, userId: data.claims.sub };
 }
 
-export async function requestMagicLinkAction(input: { email: string }) {
-  const { email } = magicLinkSchema.parse(input);
+export async function requestMagicLinkAction(input: { email: string; origin?: string }) {
+  const { email, origin } = magicLinkSchema.parse(input);
   const normalizedEmail = email.toLowerCase();
   const allowedEmails = (process.env.HOUSER_ALLOWED_EMAILS ?? "")
     .split(",")
@@ -102,7 +102,8 @@ export async function requestMagicLinkAction(input: { email: string }) {
   const requestHeaders = await headers();
   const requestOrigin = requestSiteUrl(requestHeaders);
   const configuredUrl = process.env.NEXT_PUBLIC_SITE_URL;
-  const siteUrl = requestOrigin ?? configuredUrl ?? "http://localhost:3000";
+  const submittedOrigin = origin ? new URL(origin).origin : null;
+  const siteUrl = submittedOrigin ?? requestOrigin ?? configuredUrl ?? "http://localhost:3000";
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithOtp({
     email: normalizedEmail,
