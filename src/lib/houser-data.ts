@@ -121,7 +121,7 @@ export async function getHouserWorkspace(): Promise<HouserWorkspace | null> {
       .order("created_at", { ascending: false }),
     supabase
       .from("service_records")
-      .select("id, performed_on, description, vendor_name, cost_minor, currency, warranty_ends_on, recurrence_months, next_service_on, work_items(source_key)")
+      .select("id, performed_on, description, vendor_name, cost_minor, currency, warranty_ends_on, recurrence_months, next_service_on, work_items!service_records_work_item_id_fkey(source_key)")
       .eq("property_id", property.id)
       .order("performed_on", { ascending: false }),
   ]);
