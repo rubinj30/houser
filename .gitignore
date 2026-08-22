@@ -38,6 +38,7 @@ yarn-error.log*
 # local/private source material
 /private/
 /tmp/
+/supabase/.temp/
 
 # vercel
 .vercel

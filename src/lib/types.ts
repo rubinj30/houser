@@ -65,6 +65,18 @@ export type ReviewActivity = {
   createdAt: string;
 };
 
+export type InspectionEvidencePage = {
+  pageNumber: number;
+  previewUrl: string;
+  reportUrl: string;
+};
+
+export type InspectionEvidence = {
+  documentName: string;
+  pages: InspectionEvidencePage[];
+  expiresAt: string;
+};
+
 export type HouserWorkspace = {
   accountId: string;
   propertyId: string;

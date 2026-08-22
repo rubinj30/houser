@@ -12,6 +12,7 @@ import {
   Clock3,
   FileText,
   Flame,
+  ExternalLink,
   Grid2X2,
   HardHat,
   Home,
@@ -34,8 +35,8 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import { useMemo, useState } from "react";
-import { createManualWorkItemAction, recordReviewUpdateAction, signOutAction } from "@/app/actions";
+import { useEffect, useMemo, useState, useTransition } from "react";
+import { createManualWorkItemAction, getInspectionEvidenceAction, recordReviewUpdateAction, signOutAction } from "@/app/actions";
 import {
   countBySeverity,
   filterFindings,
@@ -44,7 +45,7 @@ import {
   mergeFindings,
   severityLabels,
 } from "@/lib/findings";
-import type { Finding, InspectionSeed, LocalWorkItem, ReviewActivity, ReviewStatus, Severity } from "@/lib/types";
+import type { Finding, InspectionEvidence, InspectionSeed, LocalWorkItem, ReviewActivity, ReviewStatus, Severity } from "@/lib/types";
 
 type View = "home" | "work" | "timeline" | "assets";
 type WorkIntent = {
@@ -376,8 +377,42 @@ function FindingReviewDialog({ item, status, activities, initialStatus, onClose,
     }
   };
 
-  return <div className="fixed inset-0 z-50 flex items-end justify-end bg-[#0d1e17]/45 backdrop-blur-sm sm:p-4" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}><section role="dialog" aria-modal="true" aria-labelledby="finding-review-title" className="max-h-[92dvh] w-full overflow-y-auto rounded-t-[28px] bg-[var(--paper)] shadow-2xl sm:h-full sm:max-h-none sm:max-w-xl sm:rounded-[28px]"><div className="sticky top-0 z-10 flex items-start justify-between border-b border-black/6 bg-[rgba(252,251,248,0.94)] p-5 backdrop-blur-xl sm:p-7"><div className="pr-4"><p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--forest)]">{item.reportId} · {item.category}</p><h2 id="finding-review-title" className="font-display mt-2 text-2xl font-extrabold leading-tight tracking-[-0.04em]">{item.title}</h2><div className="mt-3"><ReviewStatusPill status={status} /></div></div><button type="button" onClick={onClose} className="grid size-10 shrink-0 place-items-center rounded-xl bg-black/5 hover:bg-black/10" aria-label="Close review"><X className="size-5"/></button></div><div className="space-y-6 p-5 sm:p-7"><section><p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--muted)]">Inspector recommendation</p><p className="mt-2 text-sm leading-6">{item.suggestedAction}</p></section><dl className="grid grid-cols-2 gap-3"><Detail label="Area" value={item.area} /><Detail label="Location" value={item.location} icon={MapPin} /><Detail label="Priority" value={item.priority} /><Detail label="Work type" value={item.workType} /></dl><section className="rounded-[22px] border border-black/7 bg-white/65 p-4"><div className="flex items-start gap-3"><div className="grid size-10 shrink-0 place-items-center rounded-xl bg-[var(--mint)] text-[var(--forest)]"><ImageIcon className="size-[18px]"/></div><div><p className="text-xs font-extrabold">Inspection evidence</p><p className="mt-1 text-sm font-bold text-[var(--forest)]">{item.sourcePages.length ? formatSourcePages(item.sourcePages) : "Manual entry"}</p><p className="mt-2 text-xs leading-5 text-[var(--muted)]">The source reference is preserved. The original page capture will appear here after private document storage is connected.</p></div></div></section><section><p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--muted)]">Owner review</p><p className="mt-2 text-sm leading-6 text-[var(--muted)]">Confirm the current condition before turning this historical inspection finding into active work.</p><div className="mt-4 grid gap-2 sm:grid-cols-2"><button type="button" onClick={() => setPendingStatus("open")} className="flex min-h-12 items-center justify-center gap-2 rounded-xl bg-[var(--forest)] px-4 text-sm font-extrabold text-white"><ClipboardCheck className="size-[18px]"/> Still needs work</button><button type="button" onClick={() => setPendingStatus("completed")} className="flex min-h-12 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white px-4 text-sm font-extrabold"><CheckCircle2 className="size-[18px]"/> Already completed</button><button type="button" onClick={() => setPendingStatus("deferred")} className="min-h-11 rounded-xl border border-black/8 px-4 text-xs font-extrabold">Defer for later</button><button type="button" onClick={() => setPendingStatus("not_applicable")} className="min-h-11 rounded-xl px-4 text-xs font-extrabold text-[var(--muted)] hover:bg-black/5">Not applicable</button></div>{pendingStatus ? <StatusUpdateForm status={pendingStatus} note={note} isSaving={isSaving} error={saveError} onNoteChange={setNote} onCancel={() => { setPendingStatus(null); setNote(""); setSaveError(""); }} onSubmit={saveUpdate} /> : null}<p className="mt-3 text-center text-[10px] font-bold text-[var(--muted)]">Synced privately · changes appear for every household member.</p></section><ActivityHistory activities={activities} /></div></section></div>;
+  return <div className="fixed inset-0 z-50 flex items-end justify-end bg-[#0d1e17]/45 backdrop-blur-sm sm:p-4" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}><section role="dialog" aria-modal="true" aria-labelledby="finding-review-title" className="max-h-[92dvh] w-full overflow-y-auto rounded-t-[28px] bg-[var(--paper)] shadow-2xl sm:h-full sm:max-h-none sm:max-w-xl sm:rounded-[28px]"><div className="sticky top-0 z-10 flex items-start justify-between border-b border-black/6 bg-[rgba(252,251,248,0.94)] p-5 backdrop-blur-xl sm:p-7"><div className="pr-4"><p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--forest)]">{item.reportId} · {item.category}</p><h2 id="finding-review-title" className="font-display mt-2 text-2xl font-extrabold leading-tight tracking-[-0.04em]">{item.title}</h2><div className="mt-3"><ReviewStatusPill status={status} /></div></div><button type="button" onClick={onClose} className="grid size-10 shrink-0 place-items-center rounded-xl bg-black/5 hover:bg-black/10" aria-label="Close review"><X className="size-5"/></button></div><div className="space-y-6 p-5 sm:p-7"><section><p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--muted)]">Inspector recommendation</p><p className="mt-2 text-sm leading-6">{item.suggestedAction}</p></section><dl className="grid grid-cols-2 gap-3"><Detail label="Area" value={item.area} /><Detail label="Location" value={item.location} icon={MapPin} /><Detail label="Priority" value={item.priority} /><Detail label="Work type" value={item.workType} /></dl><InspectionEvidenceCard item={item} /><section><p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--muted)]">Owner review</p><p className="mt-2 text-sm leading-6 text-[var(--muted)]">Confirm the current condition before turning this historical inspection finding into active work.</p><div className="mt-4 grid gap-2 sm:grid-cols-2"><button type="button" onClick={() => setPendingStatus("open")} className="flex min-h-12 items-center justify-center gap-2 rounded-xl bg-[var(--forest)] px-4 text-sm font-extrabold text-white"><ClipboardCheck className="size-[18px]"/> Still needs work</button><button type="button" onClick={() => setPendingStatus("completed")} className="flex min-h-12 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white px-4 text-sm font-extrabold"><CheckCircle2 className="size-[18px]"/> Already completed</button><button type="button" onClick={() => setPendingStatus("deferred")} className="min-h-11 rounded-xl border border-black/8 px-4 text-xs font-extrabold">Defer for later</button><button type="button" onClick={() => setPendingStatus("not_applicable")} className="min-h-11 rounded-xl px-4 text-xs font-extrabold text-[var(--muted)] hover:bg-black/5">Not applicable</button></div>{pendingStatus ? <StatusUpdateForm status={pendingStatus} note={note} isSaving={isSaving} error={saveError} onNoteChange={setNote} onCancel={() => { setPendingStatus(null); setNote(""); setSaveError(""); }} onSubmit={saveUpdate} /> : null}<p className="mt-3 text-center text-[10px] font-bold text-[var(--muted)]">Synced privately · changes appear for every household member.</p></section><ActivityHistory activities={activities} /></div></section></div>;
 }
+
+/* Signed private previews expire quickly, so browser-native images avoid a server-side optimizer caching private URLs. */
+/* eslint-disable @next/next/no-img-element */
+function InspectionEvidenceCard({ item }: { item: Finding }) {
+  const [evidence, setEvidence] = useState<InspectionEvidence | null>(null);
+  const [selectedPage, setSelectedPage] = useState(item.sourcePages[0] ?? 0);
+  const [loadError, setLoadError] = useState("");
+  const [isPending, startTransition] = useTransition();
+
+  const loadEvidence = () => {
+    if (!item.workItemId || item.sourcePages.length === 0) return;
+    setLoadError("");
+    startTransition(() => {
+      void getInspectionEvidenceAction({ workItemId: item.workItemId! })
+        .then((result) => setEvidence(result))
+        .catch((error: unknown) => setLoadError(error instanceof Error ? error.message : "Evidence could not be loaded."));
+    });
+  };
+
+  useEffect(() => {
+    const workItemId = item.workItemId;
+    if (!workItemId || item.sourcePages.length === 0) return;
+    startTransition(() => {
+      void getInspectionEvidenceAction({ workItemId })
+        .then((result) => setEvidence(result))
+        .catch((error: unknown) => setLoadError(error instanceof Error ? error.message : "Evidence could not be loaded."));
+    });
+  }, [item.sourcePages.length, item.workItemId]);
+
+  const activePage = evidence?.pages.find((page) => page.pageNumber === selectedPage) ?? evidence?.pages[0];
+
+  return <section className="rounded-[22px] border border-black/7 bg-white/65 p-4"><div className="flex items-start gap-3"><div className="grid size-10 shrink-0 place-items-center rounded-xl bg-[var(--mint)] text-[var(--forest)]"><ImageIcon className="size-[18px]"/></div><div className="min-w-0 flex-1"><p className="text-xs font-extrabold">Inspection evidence</p><p className="mt-1 text-sm font-bold text-[var(--forest)]">{item.sourcePages.length ? formatSourcePages(item.sourcePages) : "Manual entry"}</p></div></div>{item.sourcePages.length === 0 ? <p className="mt-3 text-xs leading-5 text-[var(--muted)]">This manually added item does not have an inspection source.</p> : isPending ? <div className="mt-4 space-y-3" aria-live="polite"><div className="aspect-[8.5/11] animate-pulse rounded-2xl bg-black/6"/><p className="text-xs font-bold text-[var(--muted)]">Loading private report evidence…</p></div> : loadError ? <div className="mt-4 rounded-2xl bg-[#f8ddd7] p-4"><p role="alert" className="text-xs font-bold text-[#8c3328]">{loadError}</p><button type="button" onClick={loadEvidence} className="mt-3 min-h-10 rounded-xl bg-white px-4 text-xs font-extrabold">Try again</button></div> : activePage ? <div className="mt-4"><a href={activePage.reportUrl} target="_blank" rel="noreferrer" className="group block overflow-hidden rounded-2xl border border-black/8 bg-[#efede7]" aria-label={`Open inspection report at page ${activePage.pageNumber}`}><div className="relative aspect-[8.5/11] overflow-hidden"><img src={activePage.previewUrl} alt={`Inspection report page ${activePage.pageNumber}`} className="h-full w-full object-contain transition duration-300 group-hover:scale-[1.01]" loading="lazy"/><div className="absolute inset-x-3 bottom-3 flex items-center justify-between rounded-xl bg-[rgba(13,30,23,0.88)] px-3 py-2 text-xs font-extrabold text-white backdrop-blur"><span>Page {activePage.pageNumber}</span><span className="flex items-center gap-1.5">Open report <ExternalLink className="size-3.5"/></span></div></div></a>{evidence && evidence.pages.length > 1 ? <div className="mt-3 flex gap-2 overflow-x-auto pb-1" aria-label="Inspection evidence pages">{evidence.pages.map((page) => <button key={page.pageNumber} type="button" onClick={() => setSelectedPage(page.pageNumber)} className={`min-h-10 shrink-0 rounded-xl px-3 text-xs font-extrabold ${activePage.pageNumber === page.pageNumber ? "bg-[var(--forest)] text-white" : "border border-black/8 bg-white"}`}>Page {page.pageNumber}</button>)}</div> : null}<p className="mt-3 truncate text-[10px] font-bold text-[var(--muted)]">{evidence?.documentName} · private link expires in 5 minutes</p></div> : <div className="mt-4 rounded-2xl border border-dashed border-black/10 p-4"><p className="text-xs leading-5 text-[var(--muted)]">The page reference is preserved, but this report has not been connected to private storage yet.</p></div>}</section>;
+}
+/* eslint-enable @next/next/no-img-element */
 
 function StatusUpdateForm({ status, note, isSaving, error, onNoteChange, onCancel, onSubmit }: { status: ReviewStatus; note: string; isSaving: boolean; error: string; onNoteChange: (note: string) => void; onCancel: () => void; onSubmit: (event: React.FormEvent) => void }) {
   const prompts: Partial<Record<ReviewStatus, string>> = {

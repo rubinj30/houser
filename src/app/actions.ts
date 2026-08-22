@@ -6,7 +6,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
-import type { InspectionSeed, LocalWorkItem, ReviewActivity, ReviewStatus } from "@/lib/types";
+import type { InspectionEvidence, InspectionSeed, LocalWorkItem, ReviewActivity, ReviewStatus } from "@/lib/types";
 import { databaseStatusToReview, reviewStatusToDatabase } from "@/lib/work-status";
 
 const reviewUpdateSchema = z.object({
@@ -24,6 +24,7 @@ const manualWorkSchema = z.object({
 });
 
 const magicLinkSchema = z.object({ email: z.email() });
+const evidenceRequestSchema = z.object({ workItemId: z.uuid() });
 
 const categoryAliases: Record<string, string> = {
   HVAC: "HVAC and Ventilation",
@@ -220,6 +221,60 @@ export async function recordReviewUpdateAction(input: {
       note: event.note ?? "",
       createdAt: event.created_at,
     },
+  };
+}
+
+export async function getInspectionEvidenceAction(input: { workItemId: string }): Promise<InspectionEvidence | null> {
+  const { workItemId } = evidenceRequestSchema.parse(input);
+  const { supabase } = await requireUser();
+  const { data: workItem, error: workItemError } = await supabase
+    .from("work_items")
+    .select("source_document_id,source_page_numbers")
+    .eq("id", workItemId)
+    .single();
+  if (workItemError) throw new Error(workItemError.message);
+  if (!workItem.source_document_id) return null;
+
+  const [{ data: document, error: documentError }, { data: pageRows, error: pagesError }] = await Promise.all([
+    supabase
+      .from("documents")
+      .select("storage_key,original_filename")
+      .eq("id", workItem.source_document_id)
+      .single(),
+    supabase
+      .from("document_pages")
+      .select("page_number,preview_storage_key")
+      .eq("document_id", workItem.source_document_id)
+      .in("page_number", workItem.source_page_numbers ?? [])
+      .order("page_number"),
+  ]);
+  if (documentError) throw new Error(documentError.message);
+  if (pagesError) throw new Error(pagesError.message);
+
+  const expiresInSeconds = 300;
+  const { data: reportLink, error: reportLinkError } = await supabase.storage
+    .from("inspection-documents")
+    .createSignedUrl(document.storage_key, expiresInSeconds);
+  if (reportLinkError) throw new Error(reportLinkError.message);
+
+  const pages = await Promise.all(
+    (pageRows ?? []).map(async (page) => {
+      const { data: previewLink, error: previewLinkError } = await supabase.storage
+        .from("inspection-documents")
+        .createSignedUrl(page.preview_storage_key, expiresInSeconds);
+      if (previewLinkError) throw new Error(previewLinkError.message);
+      return {
+        pageNumber: page.page_number,
+        previewUrl: previewLink.signedUrl,
+        reportUrl: `${reportLink.signedUrl}#page=${page.page_number}`,
+      };
+    }),
+  );
+
+  return {
+    documentName: document.original_filename,
+    pages,
+    expiresAt: new Date(Date.now() + expiresInSeconds * 1000).toISOString(),
   };
 }
 
