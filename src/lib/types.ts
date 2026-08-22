@@ -67,6 +67,18 @@ export type ReviewActivity = {
   createdAt: string;
 };
 
+export type InspectionEvidencePage = {
+  pageNumber: number;
+  previewUrl: string | null;
+  reportUrl: string;
+};
+
+export type InspectionEvidence = {
+  documentName: string;
+  pages: InspectionEvidencePage[];
+  expiresAt: string;
+};
+
 export type ServiceRecord = {
   id: string;
   reportId: string;

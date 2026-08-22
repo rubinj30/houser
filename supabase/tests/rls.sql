@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(30);
+select plan(34);
 
 insert into auth.users (
   instance_id, id, aud, role, email, encrypted_password,
@@ -121,6 +121,22 @@ select lives_ok(
   'an owner can stage a structured extraction'
 );
 
+select lives_ok(
+  $$ insert into public.document_pages (document_id, page_number, preview_storage_key) values ('a3000000-0000-0000-0000-000000000003', 17, 'a1000000-0000-0000-0000-000000000001/2026/a3000000-0000-0000-0000-000000000003/pages/page-17.jpg') $$,
+  'an owner can add a page preview to their inspection'
+);
+
+select results_eq(
+  $$ select page_number from public.document_pages $$,
+  array[17],
+  'an owner can read page previews for their property'
+);
+
+select lives_ok(
+  $$ insert into storage.objects (bucket_id, name, owner_id) values ('inspection-documents', 'a1000000-0000-0000-0000-000000000001/2026/a3000000-0000-0000-0000-000000000003/pages/page-17.jpg', '10000000-0000-0000-0000-000000000001') $$,
+  'an owner can write an evidence preview within their property prefix'
+);
+
 select results_eq(
   $$ select count(*)::bigint from public.extraction_runs $$,
   array[1::bigint],
@@ -184,6 +200,12 @@ select results_eq(
   $$ select count(*)::bigint from storage.objects where bucket_id = 'documents' $$,
   array[0::bigint],
   'another account cannot read private inspection objects'
+);
+
+select results_eq(
+  $$ select count(*)::bigint from storage.objects where bucket_id = 'inspection-documents' $$,
+  array[0::bigint],
+  'another account cannot read private evidence previews'
 );
 
 select throws_ok(

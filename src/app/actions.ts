@@ -6,7 +6,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
-import type { InspectionSeed, LocalWorkItem, ReviewActivity, ReviewStatus, WorkCompletionInput, WorkCompletionResult } from "@/lib/types";
+import type { InspectionEvidence, InspectionSeed, LocalWorkItem, ReviewActivity, ReviewStatus, WorkCompletionInput, WorkCompletionResult } from "@/lib/types";
 import { databaseStatusToReview, reviewStatusToDatabase } from "@/lib/work-status";
 
 const reviewUpdateSchema = z.object({
@@ -15,6 +15,8 @@ const reviewUpdateSchema = z.object({
   status: z.enum(["needs_review", "open", "completed", "deferred", "not_applicable"]),
   note: z.string().trim().max(5000),
 });
+
+const evidenceRequestSchema = z.object({ workItemId: z.uuid() });
 
 const manualWorkSchema = z.object({
   propertyId: z.uuid(),
@@ -242,6 +244,72 @@ export async function recordReviewUpdateAction(input: {
       note: event.note ?? "",
       createdAt: event.created_at,
     },
+  };
+}
+
+export async function getInspectionEvidenceAction(input: { workItemId: string }): Promise<InspectionEvidence | null> {
+  const { workItemId } = evidenceRequestSchema.parse(input);
+  const { supabase } = await requireUser();
+  const { data: workItem, error: workItemError } = await supabase
+    .from("work_items")
+    .select("source_document_id,source_page_numbers")
+    .eq("id", workItemId)
+    .single();
+  if (workItemError) throw new Error(workItemError.message);
+  if (!workItem.source_document_id) return null;
+
+  const rawSourcePages: unknown[] = Array.isArray(workItem.source_page_numbers) ? workItem.source_page_numbers : [];
+  const validSourcePages: number[] = rawSourcePages.filter(
+    (page: unknown): page is number => typeof page === "number" && Number.isInteger(page) && page > 0,
+  );
+  const sourcePages = [...new Set<number>(validSourcePages)].sort((a, b) => a - b);
+  const documentQuery = supabase
+    .from("documents")
+    .select("storage_key,storage_bucket,original_filename")
+    .eq("id", workItem.source_document_id)
+    .single();
+  const pagesQuery = sourcePages.length
+    ? supabase
+        .from("document_pages")
+        .select("page_number,preview_storage_key")
+        .eq("document_id", workItem.source_document_id)
+        .in("page_number", sourcePages)
+        .order("page_number")
+    : Promise.resolve({ data: [], error: null });
+
+  const [{ data: document, error: documentError }, { data: pageRows, error: pagesError }] = await Promise.all([documentQuery, pagesQuery]);
+  if (documentError) throw new Error(documentError.message);
+  if (pagesError) throw new Error(pagesError.message);
+
+  const expiresInSeconds = 300;
+  const reportBucket = document.storage_bucket ?? "documents";
+  const { data: reportLink, error: reportLinkError } = await supabase.storage
+    .from(reportBucket)
+    .createSignedUrl(document.storage_key, expiresInSeconds);
+  if (reportLinkError || !reportLink?.signedUrl) throw new Error(reportLinkError?.message ?? "The private report could not be opened.");
+
+  const previewByPage = new Map((pageRows ?? []).map((page) => [page.page_number, page.preview_storage_key]));
+  const pages = await Promise.all(sourcePages.map(async (pageNumber) => {
+    const previewKey = previewByPage.get(pageNumber);
+    let previewUrl: string | null = null;
+    if (previewKey) {
+      const { data: previewLink, error: previewLinkError } = await supabase.storage
+        .from("inspection-documents")
+        .createSignedUrl(previewKey, expiresInSeconds);
+      if (previewLinkError) throw new Error(previewLinkError.message);
+      previewUrl = previewLink.signedUrl;
+    }
+    return {
+      pageNumber,
+      previewUrl,
+      reportUrl: `${reportLink.signedUrl}#page=${pageNumber}`,
+    };
+  }));
+
+  return {
+    documentName: document.original_filename,
+    pages,
+    expiresAt: new Date(Date.now() + expiresInSeconds * 1000).toISOString(),
   };
 }
 
