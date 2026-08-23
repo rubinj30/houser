@@ -38,7 +38,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { completeWorkItemAction, createManualWorkItemAction, getInspectionEvidenceAction, recordReviewUpdateAction, signOutAction } from "@/app/actions";
+import { completeWorkItemAction, createManualWorkItemAction, getInspectionEvidenceAction, getLinkedWorkDocumentsAction, recordReviewUpdateAction, saveDocumentWorkDestinationAction, signOutAction } from "@/app/actions";
 import { createClient as createBrowserClient } from "@/lib/supabase/client";
 import { buildGoogleCalendarUrl, buildIcsCalendar, calendarFilename, type CalendarProperty } from "@/lib/calendar";
 import type { NormalizedDocument } from "@/lib/document-extraction";
@@ -51,7 +51,7 @@ import {
   mergeFindings,
   severityLabels,
 } from "@/lib/findings";
-import type { Finding, InspectionEvidence, InspectionSeed, LocalWorkItem, ReviewActivity, ReviewStatus, ServiceRecord, Severity, WorkCompletionInput } from "@/lib/types";
+import type { Finding, InspectionEvidence, InspectionSeed, LinkedWorkDocument, LocalWorkItem, ReviewActivity, ReviewStatus, ServiceRecord, Severity, WorkCompletionInput } from "@/lib/types";
 import { isClosedReviewStatus } from "@/lib/work-status";
 
 type View = "home" | "work" | "timeline" | "assets";
@@ -176,7 +176,7 @@ export function HouserApp({ seed, propertyId, userEmail, initialReviewStatuses, 
           }}
         />
       ) : null}
-      {isUploadingInspection ? <DocumentUploadDialog propertyId={propertyId} onClose={() => setIsUploadingInspection(false)} /> : null}
+      {isUploadingInspection ? <DocumentUploadDialog propertyId={propertyId} seed={seed} findings={allFindings} onClose={() => setIsUploadingInspection(false)} /> : null}
     </div>
   );
 }
@@ -472,6 +472,7 @@ function FindingReviewDialog({ item, calendarProperty, status, activities, servi
           <dl className="grid grid-cols-2 gap-3"><Detail label="Area" value={item.area} /><Detail label="Location" value={item.location} icon={MapPin} /><Detail label="Priority" value={item.priority} /><Detail label="Work type" value={item.workType} /></dl>
           {item.targetStartOn ? <CalendarActions item={item} property={calendarProperty} /> : null}
           <InspectionEvidenceCard item={item} />
+          <LinkedWorkDocuments workItemId={item.workItemId} />
           <section>
             <p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--muted)]">Owner review</p>
             <p className="mt-2 text-sm leading-6 text-[var(--muted)]">Confirm the current condition before turning this historical inspection finding into active work.</p>
@@ -535,6 +536,24 @@ function InspectionEvidenceCard({ item }: { item: Finding }) {
   </section>;
 }
 /* eslint-enable @next/next/no-img-element */
+
+function LinkedWorkDocuments({ workItemId }: { workItemId?: string }) {
+  const [documents, setDocuments] = useState<LinkedWorkDocument[]>([]);
+  const [loadError, setLoadError] = useState("");
+  const [isPending, startTransition] = useTransition();
+
+  useEffect(() => {
+    if (!workItemId) return;
+    startTransition(() => {
+      void getLinkedWorkDocumentsAction({ workItemId })
+        .then(setDocuments)
+        .catch((error: unknown) => setLoadError(error instanceof Error ? error.message : "Linked documents could not be loaded."));
+    });
+  }, [workItemId]);
+
+  if (!workItemId || (!isPending && !loadError && documents.length === 0)) return null;
+  return <section className="rounded-[22px] border border-black/7 bg-white/65 p-4"><div className="flex items-center gap-2"><FileText className="size-4 text-[var(--forest)]"/><p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--muted)]">Linked documents</p></div>{isPending ? <p className="mt-3 text-xs font-bold text-[var(--muted)]">Loading linked documents…</p> : loadError ? <p role="alert" className="mt-3 text-xs font-bold text-[#8c3328]">{loadError}</p> : <div className="mt-3 space-y-2">{documents.map((document) => <a key={document.id} href={`/api/documents/${document.id}/view`} target="_blank" rel="noreferrer" className="flex min-h-12 items-center justify-between gap-3 rounded-xl border border-black/7 bg-white px-3 py-2 hover:border-[var(--forest)]/25"><div className="min-w-0"><p className="truncate text-xs font-extrabold">{document.filename}</p><p className="mt-1 text-[10px] capitalize text-[var(--muted)]">{document.documentType} · {document.relationship}{document.documentDate ? ` · ${formatDateOnly(document.documentDate)}` : ""}</p></div><ExternalLink className="size-4 shrink-0 text-[var(--forest)]"/></a>)}</div>}</section>;
+}
 
 function StatusUpdateForm({ status, note, isSaving, error, onNoteChange, onCancel, onSubmit }: { status: ReviewStatus; note: string; isSaving: boolean; error: string; onNoteChange: (note: string) => void; onCancel: () => void; onSubmit: (event: React.FormEvent) => void }) {
   const prompts: Partial<Record<ReviewStatus, string>> = {
@@ -686,7 +705,7 @@ const documentTypeLabels: Record<DocumentUploadType, string> = {
   invoice: "Invoice",
 };
 
-function DocumentUploadDialog({ propertyId, onClose }: { propertyId: string; onClose: () => void }) {
+function DocumentUploadDialog({ propertyId, seed, findings, onClose }: { propertyId: string; seed: InspectionSeed; findings: Finding[]; onClose: () => void }) {
   const [documentType, setDocumentType] = useState<DocumentUploadType>("inspection");
   const [file, setFile] = useState<File | null>(null);
   const [phase, setPhase] = useState<UploadPhase>("select");
@@ -760,7 +779,7 @@ function DocumentUploadDialog({ propertyId, onClose }: { propertyId: string; onC
     {phase === "select" ? <div className="mt-6"><label className="block"><span className="text-xs font-extrabold">Document type</span><div className="relative mt-2"><select value={documentType} onChange={(event) => { setDocumentType(event.target.value as DocumentUploadType); setFile(null); setError(""); }} className="h-12 w-full appearance-none rounded-xl border border-black/10 bg-white px-4 pr-10 text-sm font-bold"><option value="inspection">Inspection report</option><option value="quote">Quote</option><option value="invoice">Invoice</option></select><ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-[var(--muted)]"/></div></label><label className="mt-4 flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-[20px] border border-dashed border-[var(--forest)]/25 bg-white/55 p-5 text-center"><Upload className="size-7 text-[var(--forest)]"/><span className="mt-3 text-sm font-extrabold">Choose {selectedLabel.toLowerCase()} PDF</span><span className="mt-1 max-w-sm text-xs leading-5 text-[var(--muted)]">PDF only · up to 50 MB · visible only to household members</span><input type="file" accept="application/pdf,.pdf" className="sr-only" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /></label>{file ? <div className="mt-3 flex items-center justify-between gap-3 rounded-xl bg-[var(--mint)]/45 px-4 py-3"><div className="min-w-0"><p className="truncate text-xs font-extrabold">{file.name}</p><p className="mt-0.5 text-[10px] text-[var(--muted)]">{selectedLabel} · {(file.size / 1_048_576).toFixed(1)} MB</p></div><CheckCircle2 className="size-5 shrink-0 text-[var(--forest)]"/></div> : null}<button type="button" onClick={uploadAndAnalyze} disabled={!file} className="mt-4 min-h-12 w-full rounded-xl bg-[var(--forest)] text-sm font-extrabold text-white disabled:opacity-40">Upload & analyze with OpenAI</button></div> : null}
     {phase === "uploading" || phase === "analyzing" ? <div className="mt-8 rounded-[20px] bg-[var(--mint)]/45 p-6 text-center"><Sparkles className="mx-auto size-7 animate-pulse text-[var(--forest)]"/><h3 className="mt-3 text-sm font-extrabold">{phase === "uploading" ? "Uploading privately…" : `Reading the ${selectedLabel.toLowerCase()}…`}</h3><p className="mt-2 text-xs leading-5 text-[var(--muted)]">{phase === "uploading" ? "The original PDF is going into private document storage." : "OpenAI is extracting structured details and page evidence. Keep this window open."}</p></div> : null}
     {phase === "review" && result?.documentType === "inspection" ? <InspectionUploadReview result={result} replaceExisting={replaceExisting} onReplaceExisting={setReplaceExisting} onClose={onClose} onImport={importFindings} /> : null}
-    {phase === "review" && result && result.documentType !== "inspection" ? <FinancialDocumentUploadReview result={result} onClose={onClose} /> : null}
+    {phase === "review" && result && result.documentType !== "inspection" ? <FinancialDocumentUploadReview result={result} findings={findings} categories={[...new Set(seed.findings.map((item) => item.category))].sort()} areas={seed.areas} onClose={onClose} /> : null}
     {phase === "importing" ? <div className="mt-8 rounded-[20px] bg-[var(--mint)]/45 p-6 text-center"><Sparkles className="mx-auto size-7 animate-pulse text-[var(--forest)]"/><h3 className="mt-3 text-sm font-extrabold">Updating the work list…</h3><p className="mt-2 text-xs text-[var(--muted)]">The replacement is performed as one database transaction.</p></div> : null}
     {error ? <p role="alert" className="mt-4 rounded-xl bg-[#f8ddd7] px-3 py-2 text-xs font-bold leading-5 text-[#8c3328]">{error}</p> : null}
   </section></div>;
@@ -770,12 +789,65 @@ function InspectionUploadReview({ result, replaceExisting, onReplaceExisting, on
   return <div className="mt-6"><div className="rounded-[20px] bg-[var(--mint)]/55 p-4"><div className="flex items-center gap-3"><CheckCircle2 className="size-6 text-[var(--forest)]"/><div><p className="text-sm font-extrabold">{result.findings.length} findings proposed</p><p className="mt-0.5 text-xs text-[var(--muted)]">{result.report.propertyAddress ?? "Inspection report"} · {result.report.pageCount} pages</p></div></div></div>{result.reviewWarnings.length ? <div className="mt-3 rounded-xl bg-[#f9e6c8] p-3 text-xs leading-5 text-[#6f4c1d]">{result.reviewWarnings.join(" ")}</div> : null}<div className="mt-4 max-h-56 space-y-2 overflow-y-auto pr-1">{result.findings.slice(0, 12).map((finding) => <div key={finding.sourceSection} className="rounded-xl border border-black/6 bg-white/65 p-3"><div className="flex justify-between gap-3"><p className="text-xs font-extrabold">{finding.title}</p><span className="shrink-0 text-[10px] font-bold text-[var(--forest)]">{finding.sourceSection}</span></div><p className="mt-1 text-[10px] text-[var(--muted)]">{finding.category} · {formatSourcePages(finding.sourcePages)}</p></div>)}{result.findings.length > 12 ? <p className="py-2 text-center text-xs font-bold text-[var(--muted)]">Plus {result.findings.length - 12} more findings</p> : null}</div><label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-black/8 bg-white/60 p-4"><input type="checkbox" checked={replaceExisting} onChange={(event) => onReplaceExisting(event.target.checked)} className="mt-0.5 size-4 accent-[var(--forest)]"/><span><span className="block text-xs font-extrabold">Replace earlier inspection findings</span><span className="mt-1 block text-[11px] leading-5 text-[var(--muted)]">Removes older inspection-generated items, keeps manual work, and preserves section 10.4.1 with its status and history.</span></span></label><div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><button type="button" onClick={onClose} className="min-h-11 rounded-xl px-4 text-xs font-extrabold text-[var(--muted)]">Cancel</button><button type="button" onClick={onImport} className="min-h-11 rounded-xl bg-[var(--forest)] px-5 text-xs font-extrabold text-white">Approve & import findings</button></div></div>;
 }
 
-function FinancialDocumentUploadReview({ result, onClose }: { result: Extract<DocumentUploadResult, { documentType: "quote" | "invoice" }>; onClose: () => void }) {
+function FinancialDocumentUploadReview({ result, findings, categories, areas, onClose }: { result: Extract<DocumentUploadResult, { documentType: "quote" | "invoice" }>; findings: Finding[]; categories: string[]; areas: string[]; onClose: () => void }) {
   const document = result.normalized;
   const vendor = document.vendor.name.value ?? "Vendor not identified";
   const total = document.financials.total.amountMinor;
   const warnings = [...document.review.warnings, ...document.review.unresolvedFields.map((field) => `Review ${field}.`)];
-  return <div className="mt-6"><div className="rounded-[20px] bg-[var(--mint)]/55 p-4"><div className="flex items-start gap-3"><CheckCircle2 className="mt-0.5 size-6 shrink-0 text-[var(--forest)]"/><div className="min-w-0"><p className="text-sm font-extrabold">{result.documentType === "invoice" ? "Invoice extracted" : "Quote extracted"}</p><p className="mt-1 truncate text-xs font-bold">{document.document.title}</p><p className="mt-1 text-xs text-[var(--muted)]">{vendor}{total === null ? "" : ` · ${formatMoney(total, document.financials.total.currency)}`}</p></div></div></div><dl className="mt-4 grid grid-cols-2 gap-2"><Detail label="Issued" value={document.document.issuedOn.value ?? "Not found"}/><Detail label="Reference" value={document.document.externalReference.value ?? "Not found"}/><Detail label="Scope items" value={String(document.scopeItems.length)}/><Detail label="Status" value={document.document.acceptanceStatus}/></dl>{warnings.length ? <div className="mt-3 rounded-xl bg-[#f9e6c8] p-3 text-xs leading-5 text-[#6f4c1d]">{warnings.slice(0, 5).join(" ")}</div> : null}<div className="mt-4 max-h-56 space-y-2 overflow-y-auto pr-1">{document.scopeItems.map((item) => <div key={item.key} className="rounded-xl border border-black/6 bg-white/65 p-3"><div className="flex justify-between gap-3"><p className="text-xs font-extrabold">{item.description}</p>{item.amount?.amountMinor === null || !item.amount ? null : <span className="shrink-0 text-xs font-extrabold text-[var(--forest)]">{formatMoney(item.amount.amountMinor, item.amount.currency)}</span>}</div><p className="mt-1 text-[10px] text-[var(--muted)]">{item.category ?? item.kind} · {formatSourcePages(item.evidence.pages)}</p></div>)}</div><p className="mt-4 rounded-xl border border-black/7 bg-white/60 p-3 text-xs leading-5 text-[var(--muted)]">The normalized extraction and original private PDF are saved. No work item or service record was changed automatically.</p><div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><a href={`/api/documents/${result.documentId}/view`} target="_blank" rel="noreferrer" className="flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 text-xs font-extrabold text-[var(--forest)]">Open original <ExternalLink className="size-3.5"/></a><button type="button" onClick={onClose} className="min-h-11 rounded-xl bg-[var(--forest)] px-5 text-xs font-extrabold text-white">Done</button></div></div>;
+  const proposedWork = document.proposedRecords.workItems[0];
+  const suggestedCategory = proposedWork?.category ?? document.scopeItems[0]?.category ?? "General";
+  const suggestedArea = proposedWork?.area ?? document.scopeItems[0]?.area ?? "General";
+  const categoryChoices = [...new Set([suggestedCategory, ...categories])];
+  const areaChoices = [...new Set([suggestedArea, ...areas])];
+  const [destination, setDestination] = useState<"new" | "existing">("new");
+  const [title, setTitle] = useState(proposedWork?.title ?? document.document.title);
+  const [category, setCategory] = useState(suggestedCategory);
+  const [area, setArea] = useState(suggestedArea);
+  const [description, setDescription] = useState(document.document.summary);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedWorkItemId, setSelectedWorkItemId] = useState<string | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [isSavingDestination, setIsSavingDestination] = useState(false);
+  const [destinationError, setDestinationError] = useState("");
+  const matchingFindings = useMemo(() => {
+    return filterFindings(findings, { query: searchQuery, severity: "all", category: "all" })
+      .filter((item): item is Finding & { workItemId: string } => Boolean(item.workItemId))
+      .slice(0, 8);
+  }, [findings, searchQuery]);
+
+  const saveDestination = async () => {
+    setDestinationError("");
+    setIsSavingDestination(true);
+    try {
+      if (destination === "existing") {
+        if (!selectedWorkItemId) throw new Error("Choose an existing work item first.");
+        await saveDocumentWorkDestinationAction({ documentId: result.documentId, destination, existingWorkItemId: selectedWorkItemId });
+      } else {
+        await saveDocumentWorkDestinationAction({
+          documentId: result.documentId,
+          destination,
+          title,
+          category,
+          area,
+          description,
+          workType: proposedWork?.workType ?? "other",
+          estimatedCostMinor: result.documentType === "quote" ? total : null,
+          currency: document.financials.total.currency,
+        });
+      }
+      window.location.reload();
+    } catch (error) {
+      setDestinationError(error instanceof Error ? error.message : "The document could not be linked to work.");
+      setIsSavingDestination(false);
+    }
+  };
+
+  return <div className="mt-6"><div className="rounded-[20px] bg-[var(--mint)]/55 p-4"><div className="flex items-start gap-3"><CheckCircle2 className="mt-0.5 size-6 shrink-0 text-[var(--forest)]"/><div className="min-w-0"><p className="text-sm font-extrabold">{result.documentType === "invoice" ? "Invoice extracted" : "Quote extracted"}</p><p className="mt-1 truncate text-xs font-bold">{document.document.title}</p><p className="mt-1 text-xs text-[var(--muted)]">{vendor}{total === null ? "" : ` · ${formatMoney(total, document.financials.total.currency)}`}</p></div></div></div><dl className="mt-4 grid grid-cols-2 gap-2"><Detail label="Issued" value={document.document.issuedOn.value ?? "Not found"}/><Detail label="Reference" value={document.document.externalReference.value ?? "Not found"}/><Detail label="Scope items" value={String(document.scopeItems.length)}/><Detail label="Status" value={document.document.acceptanceStatus}/></dl>{warnings.length ? <div className="mt-3 rounded-xl bg-[#f9e6c8] p-3 text-xs leading-5 text-[#6f4c1d]">{warnings.slice(0, 5).join(" ")}</div> : null}<div className="mt-4 max-h-56 space-y-2 overflow-y-auto pr-1">{document.scopeItems.map((item) => <div key={item.key} className="rounded-xl border border-black/6 bg-white/65 p-3"><div className="flex justify-between gap-3"><p className="text-xs font-extrabold">{item.description}</p>{item.amount?.amountMinor === null || !item.amount ? null : <span className="shrink-0 text-xs font-extrabold text-[var(--forest)]">{formatMoney(item.amount.amountMinor, item.amount.currency)}</span>}</div><p className="mt-1 text-[10px] text-[var(--muted)]">{item.category ?? item.kind} · {formatSourcePages(item.evidence.pages)}</p></div>)}</div>
+    <section className="mt-5 border-t border-black/8 pt-5"><p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--muted)]">Add to work</p><h3 className="font-display mt-1 text-lg font-extrabold">What should this document do?</h3><div className="mt-3 grid gap-2 sm:grid-cols-2"><button type="button" aria-pressed={destination === "new"} onClick={() => setDestination("new")} className={`min-h-12 rounded-xl px-4 text-sm font-extrabold ${destination === "new" ? "bg-[var(--forest)] text-white" : "border border-black/10 bg-white"}`}>Create new work item</button><button type="button" aria-pressed={destination === "existing"} onClick={() => setDestination("existing")} className={`min-h-12 rounded-xl px-4 text-sm font-extrabold ${destination === "existing" ? "bg-[var(--forest)] text-white" : "border border-black/10 bg-white"}`}>Attach to existing</button></div>
+      {destination === "new" ? <div className="mt-4 space-y-3 rounded-[18px] border border-black/7 bg-white/55 p-4"><label className="block"><span className="text-xs font-extrabold">Work item title</span><input value={title} onChange={(event) => setTitle(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 text-sm"/></label><div className="grid gap-3 sm:grid-cols-2"><label><span className="text-xs font-extrabold">Category</span><select value={category} onChange={(event) => setCategory(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 text-sm">{categoryChoices.map((choice) => <option key={choice}>{choice}</option>)}</select></label><label><span className="text-xs font-extrabold">Area</span><select value={area} onChange={(event) => setArea(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 text-sm">{areaChoices.map((choice) => <option key={choice}>{choice}</option>)}</select></label></div><label className="block"><span className="text-xs font-extrabold">Description</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={3} className="mt-2 w-full resize-y rounded-xl border border-black/10 bg-white p-3 text-sm leading-5"/></label></div>
+        : <div className="relative mt-4 rounded-[18px] border border-black/7 bg-white/55 p-4"><label className="block"><span className="text-xs font-extrabold">Find an existing work item</span><div className="relative mt-2"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--muted)]"/><input role="combobox" aria-autocomplete="list" aria-expanded={searchOpen} aria-controls="existing-work-options" value={searchQuery} onFocus={() => setSearchOpen(true)} onChange={(event) => { setSearchQuery(event.target.value); setSelectedWorkItemId(null); setSearchOpen(true); }} placeholder="Search by title, category, or area" className="h-11 w-full rounded-xl border border-black/10 bg-white pl-10 pr-3 text-sm"/></div></label>{searchOpen ? <div id="existing-work-options" role="listbox" className="mt-2 max-h-56 overflow-y-auto rounded-xl border border-black/8 bg-white p-1 shadow-lg">{matchingFindings.length ? matchingFindings.map((item) => <button key={item.workItemId} type="button" role="option" aria-selected={selectedWorkItemId === item.workItemId} onClick={() => { setSelectedWorkItemId(item.workItemId); setSearchQuery(item.title); setSearchOpen(false); }} className="w-full rounded-lg px-3 py-2.5 text-left hover:bg-[var(--mint)]"><span className="block text-xs font-extrabold">{item.title}</span><span className="mt-1 block text-[10px] text-[var(--muted)]">{item.category} · {item.area}</span></button>) : <p className="px-3 py-4 text-center text-xs text-[var(--muted)]">No matching work items</p>}</div> : null}{selectedWorkItemId && !searchOpen ? <p className="mt-2 flex items-center gap-1.5 text-xs font-extrabold text-[var(--forest)]"><CheckCircle2 className="size-4"/> Selected work item</p> : null}</div>}
+      {destinationError ? <p role="alert" className="mt-3 rounded-xl bg-[#f8ddd7] px-3 py-2 text-xs font-bold text-[#8c3328]">{destinationError}</p> : null}<p className="mt-3 text-xs leading-5 text-[var(--muted)]">The original private PDF and extracted details will remain linked to the work item.</p></section>
+    <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><a href={`/api/documents/${result.documentId}/view`} target="_blank" rel="noreferrer" className="flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 text-xs font-extrabold text-[var(--forest)]">Open original <ExternalLink className="size-3.5"/></a><button type="button" onClick={onClose} disabled={isSavingDestination} className="min-h-11 rounded-xl px-4 text-xs font-extrabold text-[var(--muted)] disabled:opacity-50">Not now</button><button type="button" onClick={saveDestination} disabled={isSavingDestination || (destination === "new" ? !title.trim() : !selectedWorkItemId)} className="min-h-11 rounded-xl bg-[var(--forest)] px-5 text-xs font-extrabold text-white disabled:opacity-40">{isSavingDestination ? "Saving…" : destination === "new" ? "Create & attach" : "Attach document"}</button></div></div>;
 }
 
 function AddWorkDialog({ seed, onClose, onAdd, onUpload }: { seed: InspectionSeed; onClose: () => void; onAdd: (item: LocalWorkItem) => Promise<void>; onUpload: () => void }) {

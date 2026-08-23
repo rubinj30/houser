@@ -81,6 +81,14 @@ export type InspectionEvidence = {
   expiresAt: string;
 };
 
+export type LinkedWorkDocument = {
+  id: string;
+  documentType: string;
+  filename: string;
+  documentDate: string | null;
+  relationship: "source" | "supporting";
+};
+
 export type ServiceRecord = {
   id: string;
   reportId: string;

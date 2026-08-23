@@ -10,8 +10,9 @@ Houser accepts non-uniform proposals, estimates, invoices, receipts, work orders
 4. Deterministic validation checks currency math, dates, required evidence, property/vendor matches, and proposed record links.
 5. The document moves to `review_ready`.
 6. The owner reviews normalized fields beside the original page evidence.
-7. Accepted fields create or link vendors, work items, assets, service records, costs, warranties, and maintenance rules.
-8. Every accepted record retains a link to the underlying private document and relevant pages.
+7. For quotes and invoices, the owner can create a model-prefilled work item or search for and attach the document to an existing item. The choice is saved only after confirmation.
+8. Accepted fields can then create or link vendors, assets, service records, costs, warranties, and maintenance rules.
+9. Every accepted record retains a link to the underlying private document and relevant pages.
 
 No model output writes directly to canonical domain tables.
 

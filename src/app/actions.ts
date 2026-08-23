@@ -6,7 +6,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
-import type { InspectionEvidence, InspectionSeed, LocalWorkItem, ReviewActivity, ReviewStatus, WorkCompletionInput, WorkCompletionResult } from "@/lib/types";
+import type { InspectionEvidence, InspectionSeed, LinkedWorkDocument, LocalWorkItem, ReviewActivity, ReviewStatus, WorkCompletionInput, WorkCompletionResult } from "@/lib/types";
 import { databaseStatusToReview, reviewStatusToDatabase } from "@/lib/work-status";
 
 const reviewUpdateSchema = z.object({
@@ -24,6 +24,25 @@ const manualWorkSchema = z.object({
   category: z.string().trim().min(1).max(100),
   area: z.string().trim().min(1).max(120),
 });
+
+const documentWorkDestinationSchema = z.discriminatedUnion("destination", [
+  z.object({
+    documentId: z.uuid(),
+    destination: z.literal("existing"),
+    existingWorkItemId: z.uuid(),
+  }),
+  z.object({
+    documentId: z.uuid(),
+    destination: z.literal("new"),
+    title: z.string().trim().min(1).max(240),
+    category: z.string().trim().min(1).max(100),
+    area: z.string().trim().min(1).max(120),
+    description: z.string().trim().max(5000),
+    workType: z.string().trim().max(40),
+    estimatedCostMinor: z.number().int().nonnegative().nullable(),
+    currency: z.string().regex(/^[A-Z]{3}$/),
+  }),
+]);
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date.");
 const completionSchema = z.object({
@@ -424,6 +443,47 @@ export async function createManualWorkItemAction(input: {
     sourcePages: [],
     isLocal: true,
   } satisfies LocalWorkItem;
+}
+
+export async function saveDocumentWorkDestinationAction(input: z.input<typeof documentWorkDestinationSchema>) {
+  const values = documentWorkDestinationSchema.parse(input);
+  const { supabase } = await requireUser();
+  const { data, error } = await supabase.rpc("link_document_to_work_item", {
+    target_document_id: values.documentId,
+    target_work_item_id: values.destination === "existing" ? values.existingWorkItemId : null,
+    new_title: values.destination === "new" ? values.title : null,
+    new_category_name: values.destination === "new" ? systemCategoryName(values.category) : null,
+    new_area_name: values.destination === "new" ? values.area : null,
+    new_description: values.destination === "new" ? values.description : null,
+    new_work_type: values.destination === "new" ? normalizeWorkType(values.workType) : "other",
+    new_estimated_cost_minor: values.destination === "new" ? values.estimatedCostMinor : null,
+    new_currency: values.destination === "new" ? values.currency : "USD",
+  });
+  if (error) throw new Error(error.message);
+  revalidatePath("/");
+  return { workItemId: data as string };
+}
+
+export async function getLinkedWorkDocumentsAction(input: { workItemId: string }): Promise<LinkedWorkDocument[]> {
+  const values = evidenceRequestSchema.parse(input);
+  const { supabase } = await requireUser();
+  const { data, error } = await supabase
+    .from("document_links")
+    .select("relationship,documents(id,document_type,original_filename,document_date)")
+    .eq("work_item_id", values.workItemId)
+    .order("created_at", { ascending: false });
+  if (error) throw new Error(error.message);
+  return (data ?? []).flatMap((row) => {
+    const related = Array.isArray(row.documents) ? row.documents[0] : row.documents;
+    if (!related) return [];
+    return [{
+      id: related.id,
+      documentType: related.document_type,
+      filename: related.original_filename,
+      documentDate: related.document_date,
+      relationship: row.relationship as LinkedWorkDocument["relationship"],
+    }];
+  });
 }
 
 export async function signOutAction() {

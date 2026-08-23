@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(34);
+select plan(40);
 
 insert into auth.users (
   instance_id, id, aud, role, email, encrypted_password,
@@ -116,6 +116,31 @@ select lives_ok(
   'an owner can create a private inspection document'
 );
 
+insert into public.documents (id, property_id, document_type, original_filename, mime_type, byte_size, storage_key, status, uploaded_by)
+values ('a3100000-0000-0000-0000-000000000003', 'a1000000-0000-0000-0000-000000000001', 'quote', 'quote.pdf', 'application/pdf', 5678, 'a1000000-0000-0000-0000-000000000001/2026/a3100000-0000-0000-0000-000000000003/original.pdf', 'review_ready', '10000000-0000-0000-0000-000000000001');
+
+select lives_ok(
+  $$ select public.link_document_to_work_item('a3000000-0000-0000-0000-000000000003', 'a1100000-0000-0000-0000-000000000001') $$,
+  'an owner can attach a document to existing work'
+);
+
+select results_eq(
+  $$ select count(*)::bigint from public.document_links where document_id = 'a3000000-0000-0000-0000-000000000003' $$,
+  array[1::bigint],
+  'the existing work attachment is retained'
+);
+
+select lives_ok(
+  $$ select public.link_document_to_work_item('a3100000-0000-0000-0000-000000000003', null, 'Replace quoted HVAC system', 'HVAC and Ventilation', null, 'Review and schedule the quoted replacement.', 'replace', 900000, 'USD') $$,
+  'an owner can generate new work from a quote'
+);
+
+select results_eq(
+  $$ select source_type || ':' || estimated_cost_minor::text from public.work_items where source_key = 'document:a3100000-0000-0000-0000-000000000003' $$,
+  array['quote:900000'::text],
+  'generated work retains its quote source and estimated cost'
+);
+
 select lives_ok(
   $$ insert into public.extraction_runs (id, document_id, property_id, model, status, result, created_by) values ('a4000000-0000-0000-0000-000000000004', 'a3000000-0000-0000-0000-000000000003', 'a1000000-0000-0000-0000-000000000001', 'test-model', 'review_ready', '{"findings":[{"sourceSection":"10.4.1","title":"Clean fireplace flue","category":"Interior","area":"Living Room","location":"Fireplace","workType":"maintain","severity":"recommendation","priority":"important","recommendation":"Have the flue evaluated and cleaned.","sourcePages":[42],"sourceExcerpt":"Evaluate and clean before use."},{"sourceSection":"5.1.4","title":"Terminate loose wiring","category":"Electrical","area":"Kitchen","location":"Under kitchen sink","workType":"repair","severity":"safety_hazard","priority":"urgent","recommendation":"Use a proper junction box.","sourcePages":[17],"sourceExcerpt":"Loose wiring was observed."}]}', '10000000-0000-0000-0000-000000000001') $$,
   'an owner can stage a structured extraction'
@@ -194,6 +219,19 @@ select results_eq(
   $$ select count(*)::bigint from public.extraction_runs $$,
   array[0::bigint],
   'another account cannot read inspection extraction results'
+);
+
+select results_eq(
+  $$ select count(*)::bigint from public.document_links $$,
+  array[0::bigint],
+  'another account cannot read document links'
+);
+
+select throws_ok(
+  $$ select public.link_document_to_work_item('a3000000-0000-0000-0000-000000000003', 'a1100000-0000-0000-0000-000000000001') $$,
+  'P0001',
+  null,
+  'another account cannot attach the first account document'
 );
 
 select results_eq(
