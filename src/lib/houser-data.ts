@@ -20,6 +20,8 @@ type WorkItemRow = {
   source_category: string | null;
   source_severity: Finding["severity"] | null;
   source_excerpt: string | null;
+  target_start_on: string | null;
+  target_end_on: string | null;
   categories: { name: string } | { name: string }[] | null;
   areas: { name: string } | { name: string }[] | null;
 };
@@ -71,6 +73,8 @@ function databaseFinding(row: WorkItemRow): Finding {
     sourcePages: row.source_page_numbers ?? [],
     sourceDocumentId: row.source_document_id ?? undefined,
     sourceExcerpt: row.source_excerpt ?? undefined,
+    targetStartOn: row.target_start_on,
+    targetEndOn: row.target_end_on,
   };
 }
 
@@ -116,7 +120,7 @@ export async function getHouserWorkspace(): Promise<HouserWorkspace | null> {
   ] = await Promise.all([
     supabase
       .from("work_items")
-      .select("id, source_key, title, description, work_type, status, priority, source_location, source_page_numbers, source_document_id, source_section, source_category, source_severity, source_excerpt, categories(name), areas(name)")
+      .select("id, source_key, title, description, work_type, status, priority, target_start_on, target_end_on, source_location, source_page_numbers, source_document_id, source_section, source_category, source_severity, source_excerpt, categories(name), areas(name)")
       .eq("property_id", property.id)
       .is("archived_at", null)
       .order("created_at"),

@@ -48,6 +48,7 @@ Implemented in the first slice:
 - Complete-work workflow with completion date and notes
 - Durable service records with vendor, actual cost, and warranty date
 - Optional recurring maintenance that creates the next scheduled work item
+- One-click Google Calendar handoff and portable `.ics` download for scheduled work
 - Service and status activity history
 
 Remaining:

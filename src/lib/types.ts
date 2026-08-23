@@ -16,6 +16,8 @@ export type Finding = {
   sourcePages: number[];
   sourceDocumentId?: string;
   sourceExcerpt?: string;
+  targetStartOn?: string | null;
+  targetEndOn?: string | null;
 };
 
 export type Asset = {

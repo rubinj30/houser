@@ -10,6 +10,7 @@ import {
   CircleDot,
   ClipboardCheck,
   Clock3,
+  Download,
   FileText,
   Flame,
   Grid2X2,
@@ -39,6 +40,7 @@ import {
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { completeWorkItemAction, createManualWorkItemAction, getInspectionEvidenceAction, recordReviewUpdateAction, signOutAction } from "@/app/actions";
 import { createClient as createBrowserClient } from "@/lib/supabase/client";
+import { buildGoogleCalendarUrl, buildIcsCalendar, calendarFilename, type CalendarProperty } from "@/lib/calendar";
 import type { NormalizedDocument } from "@/lib/document-extraction";
 import type { InspectionExtraction } from "@/lib/inspection-extraction";
 import {
@@ -100,6 +102,10 @@ export function HouserApp({ seed, propertyId, userEmail, initialReviewStatuses, 
     () => allFindings.filter((finding) => !isClosedReviewStatus(reviewStatuses[finding.reportId])),
     [allFindings, reviewStatuses],
   );
+  const calendarProperty = useMemo<CalendarProperty>(() => ({
+    displayName: seed.property.displayName,
+    address: [seed.property.address.line1, seed.property.address.city, seed.property.address.region, seed.property.address.postalCode].filter(Boolean).join(", "),
+  }), [seed.property]);
 
   const recordReviewUpdate = async (reportId: string, status: ReviewStatus, note: string) => {
     const item = allFindings.find((finding) => finding.reportId === reportId);
@@ -149,9 +155,9 @@ export function HouserApp({ seed, propertyId, userEmail, initialReviewStatuses, 
           ) : activeView === "home" ? (
             <HomeView seed={seed} findings={currentFindings} onOpenWork={openWork} onUpload={() => setIsUploadingInspection(true)} />
           ) : activeView === "work" ? (
-            <WorkView key={workIntent.revision} findings={allFindings} initialCategory={workIntent.category} initialSeverity={workIntent.severity} initialSelectedReportId={workIntent.selectedReportId} reviewStatuses={reviewStatuses} reviewActivities={reviewActivities} serviceRecords={serviceRecords} onRecordReview={recordReviewUpdate} onCompleteWork={completeWorkItem} />
+            <WorkView key={workIntent.revision} findings={allFindings} calendarProperty={calendarProperty} initialCategory={workIntent.category} initialSeverity={workIntent.severity} initialSelectedReportId={workIntent.selectedReportId} reviewStatuses={reviewStatuses} reviewActivities={reviewActivities} serviceRecords={serviceRecords} onRecordReview={recordReviewUpdate} onCompleteWork={completeWorkItem} />
           ) : activeView === "timeline" ? (
-            <TimelineView findings={currentFindings} reviewStatuses={reviewStatuses} reviewActivities={reviewActivities} serviceRecords={serviceRecords} onRecordReview={recordReviewUpdate} onCompleteWork={completeWorkItem} />
+            <TimelineView findings={currentFindings} calendarProperty={calendarProperty} reviewStatuses={reviewStatuses} reviewActivities={reviewActivities} serviceRecords={serviceRecords} onRecordReview={recordReviewUpdate} onCompleteWork={completeWorkItem} />
           ) : (
             <AssetsView seed={seed} />
           )}
@@ -337,7 +343,7 @@ function CompactFinding({ item, last, onOpen }: { item: Finding; last: boolean; 
   return <button type="button" onClick={onOpen} className={`group flex w-full gap-3 p-4 text-left transition hover:bg-[var(--mint)]/35 sm:p-5 ${last ? "" : "border-b border-black/6"}`} aria-label={`Open ${item.title}`}><div className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-xl bg-[#f8ddd7] text-[#a33e32]"><AlertTriangle className="size-[17px]" /></div><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-2"><h3 className="text-sm font-extrabold leading-5 group-hover:text-[var(--forest)]">{item.title}</h3><ArrowRight className="size-4 shrink-0 text-[var(--muted)] transition group-hover:translate-x-0.5 group-hover:text-[var(--forest)]" /></div><p className="mt-1 truncate text-xs text-[var(--muted)]">{item.location}</p><div className="mt-2 flex items-center gap-2 text-[10px] font-extrabold uppercase tracking-[0.08em] text-[var(--muted)]"><Camera className="size-3" /> {formatSourcePages(item.sourcePages)}</div></div></button>;
 }
 
-function WorkView({ findings, initialCategory, initialSeverity, initialSelectedReportId, reviewStatuses, reviewActivities, serviceRecords, onRecordReview, onCompleteWork }: { findings: Finding[]; initialCategory: string; initialSeverity: Severity | "all"; initialSelectedReportId: string | null; reviewStatuses: Record<string, ReviewStatus>; reviewActivities: ReviewActivity[]; serviceRecords: ServiceRecord[]; onRecordReview: (reportId: string, status: ReviewStatus, note: string) => Promise<void>; onCompleteWork: (reportId: string, details: CompletionDetails) => Promise<unknown> }) {
+function WorkView({ findings, calendarProperty, initialCategory, initialSeverity, initialSelectedReportId, reviewStatuses, reviewActivities, serviceRecords, onRecordReview, onCompleteWork }: { findings: Finding[]; calendarProperty: CalendarProperty; initialCategory: string; initialSeverity: Severity | "all"; initialSelectedReportId: string | null; reviewStatuses: Record<string, ReviewStatus>; reviewActivities: ReviewActivity[]; serviceRecords: ServiceRecord[]; onRecordReview: (reportId: string, status: ReviewStatus, note: string) => Promise<void>; onCompleteWork: (reportId: string, details: CompletionDetails) => Promise<unknown> }) {
   const [scope, setScope] = useState<"current" | "history">("current");
   const [query, setQuery] = useState("");
   const [severity, setSeverity] = useState<Severity | "all">(initialSeverity);
@@ -378,7 +384,7 @@ function WorkView({ findings, initialCategory, initialSeverity, initialSelectedR
       <div className="mt-2 grid gap-3 xl:grid-cols-2">{filtered.map((item) => <FindingCard key={item.workItemId ?? item.reportId} item={item} status={reviewStatuses[item.reportId] ?? "needs_review"} menuOpen={menuItemId === item.reportId} onOpen={() => { setMenuItemId(null); setRequestedStatus(null); setSelectedItem(item); }} onToggleMenu={() => setMenuItemId((current) => current === item.reportId ? null : item.reportId)} onSetStatus={(status) => { setMenuItemId(null); setRequestedStatus(status); setSelectedItem(item); }} />)}</div>
       {filtered.length === 0 ? <div className="mt-8 rounded-[24px] border border-dashed border-black/15 p-10 text-center"><Search className="mx-auto size-7 text-[var(--muted)]"/><h2 className="font-display mt-3 text-lg font-extrabold">{scope === "history" && historyCount === 0 ? "No closed work yet" : "No matching work"}</h2><p className="mt-1 text-sm text-[var(--muted)]">{scope === "history" && historyCount === 0 ? "Completed and dismissed items will appear here." : "Try another search or clear a filter."}</p></div> : null}
     </div>
-    {selectedItem ? <FindingReviewDialog key={`${selectedItem.reportId}-${requestedStatus ?? "details"}`} item={selectedItem} status={reviewStatuses[selectedItem.reportId] ?? "needs_review"} activities={reviewActivities.filter((activity) => activity.reportId === selectedItem.reportId)} serviceRecords={serviceRecords.filter((record) => record.reportId === selectedItem.reportId)} initialStatus={requestedStatus} onClose={() => { setSelectedItem(null); setRequestedStatus(null); }} onRecordReview={(status, note) => onRecordReview(selectedItem.reportId, status, note)} onCompleteWork={(details) => onCompleteWork(selectedItem.reportId, details)} /> : null}
+    {selectedItem ? <FindingReviewDialog key={`${selectedItem.reportId}-${requestedStatus ?? "details"}`} item={selectedItem} calendarProperty={calendarProperty} status={reviewStatuses[selectedItem.reportId] ?? "needs_review"} activities={reviewActivities.filter((activity) => activity.reportId === selectedItem.reportId)} serviceRecords={serviceRecords.filter((record) => record.reportId === selectedItem.reportId)} initialStatus={requestedStatus} onClose={() => { setSelectedItem(null); setRequestedStatus(null); }} onRecordReview={(status, note) => onRecordReview(selectedItem.reportId, status, note)} onCompleteWork={(details) => onCompleteWork(selectedItem.reportId, details)} /> : null}
     </>
   );
 }
@@ -397,7 +403,7 @@ function ReviewStatusPill({ status }: { status: ReviewStatus }) {
   return <span className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold ${style}`}>{reviewStatusLabels[status]}</span>;
 }
 
-function FindingReviewDialog({ item, status, activities, serviceRecords, initialStatus, onClose, onRecordReview, onCompleteWork }: { item: Finding; status: ReviewStatus; activities: ReviewActivity[]; serviceRecords: ServiceRecord[]; initialStatus: ReviewStatus | null; onClose: () => void; onRecordReview: (status: ReviewStatus, note: string) => Promise<void>; onCompleteWork: (details: CompletionDetails) => Promise<unknown> }) {
+function FindingReviewDialog({ item, calendarProperty, status, activities, serviceRecords, initialStatus, onClose, onRecordReview, onCompleteWork }: { item: Finding; calendarProperty: CalendarProperty; status: ReviewStatus; activities: ReviewActivity[]; serviceRecords: ServiceRecord[]; initialStatus: ReviewStatus | null; onClose: () => void; onRecordReview: (status: ReviewStatus, note: string) => Promise<void>; onCompleteWork: (details: CompletionDetails) => Promise<unknown> }) {
   const [pendingStatus, setPendingStatus] = useState<ReviewStatus | null>(initialStatus);
   const [note, setNote] = useState("");
   const [isSaving, setIsSaving] = useState(false);
@@ -464,6 +470,7 @@ function FindingReviewDialog({ item, status, activities, serviceRecords, initial
         <div className="space-y-6 p-5 sm:p-7">
           <section><p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--muted)]">Inspector recommendation</p><p className="mt-2 text-sm leading-6">{item.suggestedAction}</p></section>
           <dl className="grid grid-cols-2 gap-3"><Detail label="Area" value={item.area} /><Detail label="Location" value={item.location} icon={MapPin} /><Detail label="Priority" value={item.priority} /><Detail label="Work type" value={item.workType} /></dl>
+          {item.targetStartOn ? <CalendarActions item={item} property={calendarProperty} /> : null}
           <InspectionEvidenceCard item={item} />
           <section>
             <p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--muted)]">Owner review</p>
@@ -604,17 +611,45 @@ function Detail({ label, value, icon: Icon }: { label: string; value: string; ic
   return <div className="rounded-2xl bg-black/[0.035] p-3"><dt className="flex items-center gap-1 text-[10px] font-extrabold uppercase tracking-[0.08em] text-[var(--muted)]">{Icon ? <Icon className="size-3"/> : null}{label}</dt><dd className="mt-1 break-words text-xs font-bold capitalize">{value.replaceAll("_", " ")}</dd></div>;
 }
 
-function TimelineView({ findings, reviewStatuses, reviewActivities, serviceRecords, onRecordReview, onCompleteWork }: { findings: Finding[]; reviewStatuses: Record<string, ReviewStatus>; reviewActivities: ReviewActivity[]; serviceRecords: ServiceRecord[]; onRecordReview: (reportId: string, status: ReviewStatus, note: string) => Promise<void>; onCompleteWork: (reportId: string, details: CompletionDetails) => Promise<unknown> }) {
+function CalendarActions({ item, property }: { item: Finding; property: CalendarProperty }) {
+  if (!item.targetStartOn) return null;
+
+  const openGoogleCalendar = () => {
+    window.open(buildGoogleCalendarUrl(item, property, window.location.origin), "_blank", "noopener,noreferrer");
+  };
+
+  const downloadIcs = () => {
+    const objectUrl = URL.createObjectURL(new Blob([buildIcsCalendar(item, property, window.location.origin)], { type: "text/calendar;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = objectUrl;
+    link.download = calendarFilename(item);
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+  };
+
+  return <section className="rounded-[22px] border border-[var(--forest)]/15 bg-[var(--mint)]/45 p-4"><div className="flex items-start gap-3"><div className="grid size-10 shrink-0 place-items-center rounded-xl bg-white text-[var(--forest)]"><CalendarClock className="size-[18px]"/></div><div><p className="text-xs font-extrabold">Scheduled for {formatTargetWindow(item)}</p><p className="mt-1 text-xs leading-5 text-[var(--muted)]">Add this all-day reminder to Google Calendar or download a file for another calendar app.</p></div></div><div className="mt-4 grid gap-2 sm:grid-cols-2"><button type="button" onClick={openGoogleCalendar} className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[var(--forest)] px-4 text-xs font-extrabold text-white">Google Calendar <ExternalLink className="size-3.5"/></button><button type="button" onClick={downloadIcs} className="flex min-h-11 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white px-4 text-xs font-extrabold text-[var(--forest)]"><Download className="size-3.5"/> Download .ics</button></div></section>;
+}
+
+function formatTargetWindow(item: Finding) {
+  if (!item.targetStartOn) return "Unscheduled";
+  const start = formatDateOnly(item.targetStartOn);
+  if (!item.targetEndOn || item.targetEndOn === item.targetStartOn) return start;
+  return `${start} – ${formatDateOnly(item.targetEndOn)}`;
+}
+
+function TimelineView({ findings, calendarProperty, reviewStatuses, reviewActivities, serviceRecords, onRecordReview, onCompleteWork }: { findings: Finding[]; calendarProperty: CalendarProperty; reviewStatuses: Record<string, ReviewStatus>; reviewActivities: ReviewActivity[]; serviceRecords: ServiceRecord[]; onRecordReview: (reportId: string, status: ReviewStatus, note: string) => Promise<void>; onCompleteWork: (reportId: string, details: CompletionDetails) => Promise<unknown> }) {
   const [selectedItem, setSelectedItem] = useState<Finding | null>(null);
-  const safety = findings.filter((item) => item.severity === "safety_hazard");
-  const important = findings.filter((item) => item.priority === "important" && item.severity !== "safety_hazard");
-  const routine = findings.filter((item) => item.priority === "routine" || item.priority === "informational");
-  return <><div className="enter"><PageHeading eyebrow="Plan by time" title="Maintenance timeline" description="The initial report has no trusted due dates yet, so work is grouped by recommended review horizon." /><div className="mt-8 max-w-4xl space-y-8"><TimelineGroup label="Verify first" note="Safety findings · review now" color="rose" items={safety} reviewStatuses={reviewStatuses} onOpen={setSelectedItem} /><TimelineGroup label="Plan next" note="Important recommendations · schedule after review" color="amber" items={important.slice(0, 8)} reviewStatuses={reviewStatuses} onOpen={setSelectedItem} /><TimelineGroup label="Routine & long-term" note="Maintenance, monitoring, and cosmetic work" color="forest" items={routine.slice(0, 8)} reviewStatuses={reviewStatuses} onOpen={setSelectedItem} /></div></div>{selectedItem ? <FindingReviewDialog item={selectedItem} status={reviewStatuses[selectedItem.reportId] ?? "needs_review"} activities={reviewActivities.filter((activity) => activity.reportId === selectedItem.reportId)} serviceRecords={serviceRecords.filter((record) => record.reportId === selectedItem.reportId)} initialStatus={null} onClose={() => setSelectedItem(null)} onRecordReview={(status, note) => onRecordReview(selectedItem.reportId, status, note)} onCompleteWork={(details) => onCompleteWork(selectedItem.reportId, details)} /> : null}</>;
+  const scheduled = findings.filter((item) => item.targetStartOn).sort((a, b) => (a.targetStartOn ?? "").localeCompare(b.targetStartOn ?? ""));
+  const unscheduled = findings.filter((item) => !item.targetStartOn);
+  const safety = unscheduled.filter((item) => item.severity === "safety_hazard");
+  const important = unscheduled.filter((item) => item.priority === "important" && item.severity !== "safety_hazard");
+  const routine = unscheduled.filter((item) => item.priority === "routine" || item.priority === "informational");
+  return <><div className="enter"><PageHeading eyebrow="Plan by time" title="Maintenance timeline" description={scheduled.length ? "Scheduled work appears first. Open any scheduled item to add it to Google Calendar or download an .ics reminder." : "The initial report has no trusted due dates yet, so work is grouped by recommended review horizon."} /><div className="mt-8 max-w-4xl space-y-8">{scheduled.length ? <TimelineGroup label="Scheduled" note="Ready to add to your calendar" color="forest" items={scheduled} reviewStatuses={reviewStatuses} onOpen={setSelectedItem} /> : null}<TimelineGroup label="Verify first" note="Safety findings · review now" color="rose" items={safety} reviewStatuses={reviewStatuses} onOpen={setSelectedItem} /><TimelineGroup label="Plan next" note="Important recommendations · schedule after review" color="amber" items={important.slice(0, 8)} reviewStatuses={reviewStatuses} onOpen={setSelectedItem} /><TimelineGroup label="Routine & long-term" note="Maintenance, monitoring, and cosmetic work" color="forest" items={routine.slice(0, 8)} reviewStatuses={reviewStatuses} onOpen={setSelectedItem} /></div></div>{selectedItem ? <FindingReviewDialog item={selectedItem} calendarProperty={calendarProperty} status={reviewStatuses[selectedItem.reportId] ?? "needs_review"} activities={reviewActivities.filter((activity) => activity.reportId === selectedItem.reportId)} serviceRecords={serviceRecords.filter((record) => record.reportId === selectedItem.reportId)} initialStatus={null} onClose={() => setSelectedItem(null)} onRecordReview={(status, note) => onRecordReview(selectedItem.reportId, status, note)} onCompleteWork={(details) => onCompleteWork(selectedItem.reportId, details)} /> : null}</>;
 }
 
 function TimelineGroup({ label, note, color, items, reviewStatuses, onOpen }: { label: string; note: string; color: "rose" | "amber" | "forest"; items: Finding[]; reviewStatuses: Record<string, ReviewStatus>; onOpen: (item: Finding) => void }) {
   const colors = { rose: "bg-[var(--rose)]", amber: "bg-[var(--amber)]", forest: "bg-[var(--forest)]" };
-  return <section className="grid gap-4 sm:grid-cols-[150px_1fr]"><div><div className="flex items-center gap-2"><div className={`size-2.5 rounded-full ${colors[color]}`}/><h2 className="font-display text-base font-extrabold">{label}</h2></div><p className="ml-[18px] mt-1 text-xs leading-5 text-[var(--muted)]">{note}</p></div><div className="relative space-y-3 before:absolute before:-left-[22px] before:top-2 before:h-[calc(100%-16px)] before:w-px before:bg-black/10">{items.map((item) => <button type="button" key={item.reportId} onClick={() => onOpen(item)} className="group block w-full rounded-[20px] border border-black/6 bg-[var(--paper)] p-4 text-left transition hover:-translate-y-0.5 hover:border-[var(--forest)]/20 surface-shadow"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="text-[10px] font-extrabold uppercase tracking-[0.1em] text-[var(--muted)]">{item.category} · {item.reportId}</div><h3 className="mt-1 text-sm font-extrabold group-hover:text-[var(--forest)]">{item.title}</h3><p className="mt-1 text-xs text-[var(--muted)]">{item.location}</p><div className="mt-2"><ReviewStatusPill status={reviewStatuses[item.reportId] ?? "needs_review"} /></div></div><ArrowRight className="mt-1 size-4 shrink-0 text-[var(--muted)] transition group-hover:translate-x-0.5 group-hover:text-[var(--forest)]"/></div></button>)}</div></section>;
+  return <section className="grid gap-4 sm:grid-cols-[150px_1fr]"><div><div className="flex items-center gap-2"><div className={`size-2.5 rounded-full ${colors[color]}`}/><h2 className="font-display text-base font-extrabold">{label}</h2></div><p className="ml-[18px] mt-1 text-xs leading-5 text-[var(--muted)]">{note}</p></div><div className="relative space-y-3 before:absolute before:-left-[22px] before:top-2 before:h-[calc(100%-16px)] before:w-px before:bg-black/10">{items.map((item) => <button type="button" key={item.reportId} onClick={() => onOpen(item)} className="group block w-full rounded-[20px] border border-black/6 bg-[var(--paper)] p-4 text-left transition hover:-translate-y-0.5 hover:border-[var(--forest)]/20 surface-shadow"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="text-[10px] font-extrabold uppercase tracking-[0.1em] text-[var(--muted)]">{item.category} · {item.reportId}</div><h3 className="mt-1 text-sm font-extrabold group-hover:text-[var(--forest)]">{item.title}</h3><p className="mt-1 text-xs text-[var(--muted)]">{item.targetStartOn ? formatTargetWindow(item) : item.location}</p><div className="mt-2"><ReviewStatusPill status={reviewStatuses[item.reportId] ?? "needs_review"} /></div></div><ArrowRight className="mt-1 size-4 shrink-0 text-[var(--muted)] transition group-hover:translate-x-0.5 group-hover:text-[var(--forest)]"/></div></button>)}</div></section>;
 }
 
 function AssetsView({ seed }: { seed: InspectionSeed }) {
