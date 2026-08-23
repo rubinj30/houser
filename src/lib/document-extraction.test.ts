@@ -29,6 +29,7 @@ describe("normalized document extraction", () => {
     const common = { originalFilename: "source.pdf", privateObjectKey: "property/document/original.pdf", sha256: "a".repeat(64) };
     expect(buildDocumentExtractionPrompt({ ...common, documentType: "quote" })).toContain("proposed, not completed");
     expect(buildDocumentExtractionPrompt({ ...common, documentType: "invoice" })).toContain("performed or billed");
+    expect(buildDocumentExtractionPrompt({ ...common, documentType: "receipt" })).toContain("paid amount");
   });
 
   it("can be converted to an OpenAI structured-output format", () => {

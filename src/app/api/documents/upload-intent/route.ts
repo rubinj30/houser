@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 
 const requestSchema = z.object({
   propertyId: z.string().uuid(),
-  documentType: z.enum(["inspection", "quote", "invoice"]),
+  documentType: z.enum(["inspection", "quote", "invoice", "receipt"]),
   filename: z.string().min(1).max(240),
   mimeType: z.literal("application/pdf"),
   byteSize: z.number().int().positive().max(52_428_800),

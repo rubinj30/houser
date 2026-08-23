@@ -108,7 +108,7 @@ export type NormalizedDocument = z.infer<typeof normalizedDocumentSchema>;
 
 export const DOCUMENT_EXTRACTION_MODEL = "gpt-5.4-mini-2026-03-17";
 
-export type FinancialDocumentType = "quote" | "invoice";
+export type FinancialDocumentType = "quote" | "invoice" | "receipt";
 
 export function buildDocumentExtractionPrompt({
   documentType,
@@ -123,7 +123,9 @@ export function buildDocumentExtractionPrompt({
 }) {
   const typeInstruction = documentType === "invoice"
     ? "Classify document.type as invoice. Extract work described as performed or billed, not as proposed future work."
-    : "Classify document.type as proposal or estimate, whichever best matches the document. Extract work as proposed, not completed.";
+    : documentType === "receipt"
+      ? "Classify document.type as receipt. Extract the purchase or completed service represented by the receipt, including the paid amount when present."
+      : "Classify document.type as proposal or estimate, whichever best matches the document. Extract work as proposed, not completed.";
 
   return `You are extracting a ${documentType} into Houser's normalized private-document record.
 

@@ -21,7 +21,7 @@ export async function POST(_request: Request, { params }: Context) {
     .select("id, property_id, document_type, storage_key, original_filename, sha256")
     .eq("id", documentId)
     .maybeSingle();
-  if (!document || !["inspection", "quote", "invoice"].includes(document.document_type)) return NextResponse.json({ error: "Supported document not found." }, { status: 404 });
+  if (!document || !["inspection", "quote", "invoice", "receipt"].includes(document.document_type)) return NextResponse.json({ error: "Supported document not found." }, { status: 404 });
 
   const isInspection = document.document_type === "inspection";
   const model = isInspection ? INSPECTION_MODEL : DOCUMENT_EXTRACTION_MODEL;
@@ -48,7 +48,7 @@ export async function POST(_request: Request, { params }: Context) {
     const prompt = isInspection
       ? INSPECTION_EXTRACTION_PROMPT
       : buildDocumentExtractionPrompt({
-          documentType: document.document_type as "quote" | "invoice",
+          documentType: document.document_type as "quote" | "invoice" | "receipt",
           originalFilename: document.original_filename,
           privateObjectKey: document.storage_key,
           sha256: document.sha256 ?? "0".repeat(64),
@@ -74,7 +74,9 @@ export async function POST(_request: Request, { params }: Context) {
     if ("document" in result) {
       const extractedTypeMatches = document.document_type === "invoice"
         ? result.document.type === "invoice"
-        : result.document.type === "proposal" || result.document.type === "estimate";
+        : document.document_type === "receipt"
+          ? result.document.type === "receipt"
+          : result.document.type === "proposal" || result.document.type === "estimate";
       if (!extractedTypeMatches) throw new Error(`The PDF did not appear to be the selected ${document.document_type} type.`);
       result.document.sourceFile.originalFilename = document.original_filename;
       result.document.sourceFile.privateObjectKey = document.storage_key;
