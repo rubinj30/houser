@@ -26,6 +26,7 @@ import {
   MoreHorizontal,
   MapPin,
   MessageSquareText,
+  MessageCircle,
   Plus,
   Search,
   Settings,
@@ -37,6 +38,7 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { completeWorkItemAction, createManualWorkItemAction, getInspectionEvidenceAction, getLinkedWorkDocumentsAction, recordReviewUpdateAction, saveDocumentWorkDestinationAction, signOutAction } from "@/app/actions";
 import { createClient as createBrowserClient } from "@/lib/supabase/client";
@@ -87,8 +89,9 @@ const navItems: { id: View; label: string; icon: LucideIcon }[] = [
   { id: "assets", label: "Assets", icon: Grid2X2 },
 ];
 
-export function HouserApp({ seed, propertyId, userEmail, initialReviewStatuses, initialReviewActivities, initialServiceRecords }: { seed: InspectionSeed; propertyId: string; userEmail: string; initialReviewStatuses: Record<string, ReviewStatus>; initialReviewActivities: ReviewActivity[]; initialServiceRecords: ServiceRecord[] }) {
-  const [activeView, setActiveView] = useState<View>("home");
+export function HouserApp({ seed, propertyId, userEmail, initialWorkReportId, initialReviewStatuses, initialReviewActivities, initialServiceRecords }: { seed: InspectionSeed; propertyId: string; userEmail: string; initialWorkReportId: string | null; initialReviewStatuses: Record<string, ReviewStatus>; initialReviewActivities: ReviewActivity[]; initialServiceRecords: ServiceRecord[] }) {
+  const initialWorkItem = seed.findings.find((item) => item.reportId === initialWorkReportId);
+  const [activeView, setActiveView] = useState<View>(initialWorkItem ? "work" : "home");
   const [property, setProperty] = useState<"ivy" | "rental">("ivy");
   const [isAdding, setIsAdding] = useState(false);
   const [isUploadingInspection, setIsUploadingInspection] = useState(false);
@@ -97,7 +100,7 @@ export function HouserApp({ seed, propertyId, userEmail, initialReviewStatuses, 
   const [reviewStatuses, setReviewStatuses] = useState(initialReviewStatuses);
   const [reviewActivities, setReviewActivities] = useState(initialReviewActivities);
   const [serviceRecords, setServiceRecords] = useState(initialServiceRecords);
-  const [workIntent, setWorkIntent] = useState<WorkIntent>({ category: "all", severity: "all", selectedReportId: null, revision: 0 });
+  const [workIntent, setWorkIntent] = useState<WorkIntent>({ category: "all", severity: "all", selectedReportId: initialWorkItem?.reportId ?? null, revision: 0 });
   const allFindings = useMemo(() => mergeFindings(localItems, seed.findings), [localItems, seed.findings]);
   const currentFindings = useMemo(
     () => allFindings.filter((finding) => !isClosedReviewStatus(reviewStatuses[finding.reportId])),
@@ -237,7 +240,7 @@ function TopBar({ property, userEmail, setProperty, onAdd, onUpload }: { propert
       <div className="mx-auto flex max-w-[1500px] items-center justify-between gap-3">
         <div className="lg:hidden"><div className="flex items-center gap-2"><div className="grid size-9 place-items-center rounded-xl bg-[var(--forest-dark)] text-[var(--lime)]"><Home className="size-[18px]" /></div><span className="font-display text-lg font-extrabold tracking-tight">Houser</span></div></div>
         <PropertySelect property={property} setProperty={setProperty} className="hidden sm:block" />
-        <div className="flex items-center gap-2"><form action={signOutAction} className="lg:hidden"><button type="submit" aria-label={`Sign out ${userEmail}`} className="grid size-11 place-items-center rounded-xl border border-black/8 bg-white/65 text-[var(--muted)]"><LogOut className="size-[18px]" /></button></form><button type="button" onClick={onUpload} className="hidden min-h-11 items-center gap-2 rounded-xl border border-black/8 bg-white/70 px-4 text-sm font-bold text-[var(--forest)] sm:flex"><Upload className="size-[18px]" /> Upload document</button><button type="button" onClick={onAdd} className="hidden min-h-11 items-center gap-2 rounded-xl bg-[var(--forest)] px-4 text-sm font-bold text-white shadow-lg shadow-[#214f3e]/15 transition hover:-translate-y-0.5 hover:bg-[var(--forest-dark)] sm:flex"><Plus className="size-[18px]" /> Add work</button></div>
+        <div className="flex items-center gap-2"><Link href="/chat" className="flex min-h-11 items-center gap-2 rounded-xl border border-[var(--forest)]/15 bg-[var(--mint)]/60 px-3 text-sm font-extrabold text-[var(--forest)] sm:px-4"><MessageCircle className="size-[18px]"/><span className="hidden sm:inline">Ask Houser</span><span className="sr-only sm:hidden">Ask Houser</span></Link><form action={signOutAction} className="lg:hidden"><button type="submit" aria-label={`Sign out ${userEmail}`} className="grid size-11 place-items-center rounded-xl border border-black/8 bg-white/65 text-[var(--muted)]"><LogOut className="size-[18px]" /></button></form><button type="button" onClick={onUpload} className="hidden min-h-11 items-center gap-2 rounded-xl border border-black/8 bg-white/70 px-4 text-sm font-bold text-[var(--forest)] sm:flex"><Upload className="size-[18px]" /> Upload document</button><button type="button" onClick={onAdd} className="hidden min-h-11 items-center gap-2 rounded-xl bg-[var(--forest)] px-4 text-sm font-bold text-white shadow-lg shadow-[#214f3e]/15 transition hover:-translate-y-0.5 hover:bg-[var(--forest-dark)] sm:flex"><Plus className="size-[18px]" /> Add work</button></div>
       </div>
       <PropertySelect property={property} setProperty={setProperty} className="mt-3 block sm:hidden" full />
     </header>
