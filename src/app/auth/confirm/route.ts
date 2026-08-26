@@ -21,7 +21,15 @@ export async function GET(request: NextRequest) {
       ? await supabase.auth.verifyOtp({ token_hash: tokenHash, type })
       : { error: new Error("Missing sign-in token") };
 
-  if (!result.error) return NextResponse.redirect(redirectTo);
+  if (!result.error) {
+    const { error: invitationError } = await supabase.rpc("accept_account_invitations");
+    if (invitationError && !invitationError.message.includes("Could not find the function")) {
+      redirectTo.pathname = "/";
+      redirectTo.searchParams.set("auth_error", "invite");
+      return NextResponse.redirect(redirectTo);
+    }
+    return NextResponse.redirect(redirectTo);
+  }
   redirectTo.pathname = "/";
   redirectTo.searchParams.set("auth_error", "1");
   return NextResponse.redirect(redirectTo);

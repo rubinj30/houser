@@ -4,11 +4,11 @@ import { CheckCircle2, Home, LoaderCircle, Mail, ShieldCheck } from "lucide-reac
 import { useState } from "react";
 import { requestMagicLinkAction } from "@/app/actions";
 
-export function AuthScreen({ authError = false }: { authError?: boolean }) {
+export function AuthScreen({ authError = false, invitationError = false }: { authError?: boolean; invitationError?: boolean }) {
   const [email, setEmail] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [sentTo, setSentTo] = useState<string | null>(null);
-  const [error, setError] = useState(authError ? "That sign-in link could not be verified. Request a fresh one below." : "");
+  const [error, setError] = useState(invitationError ? "You signed in, but the household invitation could not be accepted. Ask the household owner to resend it." : authError ? "That sign-in link could not be verified. Request a fresh one below." : "");
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -57,14 +57,14 @@ export function AuthScreen({ authError = false }: { authError?: boolean }) {
               <button type="button" onClick={() => setSentTo(null)} className="mt-6 min-h-11 text-sm font-extrabold text-[var(--forest)]">Use another email</button>
             </div>
           ) : (
-            <form onSubmit={submit} className="rounded-[28px] border border-black/7 bg-[var(--paper)] p-6 surface-shadow sm:p-8">
+            <form onSubmit={submit} autoComplete="on" className="rounded-[28px] border border-black/7 bg-[var(--paper)] p-6 surface-shadow sm:p-8">
               <p className="text-xs font-extrabold uppercase tracking-[0.14em] text-[var(--forest)]">Private workspace</p>
               <h1 className="font-display mt-3 text-3xl font-extrabold tracking-[-0.045em]">Sign in to Houser</h1>
               <p className="mt-3 text-sm leading-6 text-[var(--muted)]">Enter your email and we’ll send a password-free sign-in link.</p>
-              <label className="mt-7 block"><span className="text-xs font-extrabold">Email address</span><input type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" className="mt-2 h-12 w-full rounded-xl border border-black/10 bg-white px-4 text-sm outline-none focus:border-[var(--forest)]/40" /></label>
+              <label htmlFor="sign-in-email" className="mt-7 block"><span className="text-xs font-extrabold">Email address</span><input id="sign-in-email" name="email" type="email" inputMode="email" autoComplete="email" autoCapitalize="none" spellCheck={false} required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" className="mt-2 h-12 w-full rounded-xl border border-black/10 bg-white px-4 text-sm outline-none focus:border-[var(--forest)]/40" /></label>
               {error ? <p role="alert" className="mt-3 rounded-xl bg-[#f8ddd7] px-3 py-2 text-xs font-bold text-[#8c3328]">{error}</p> : null}
               <button type="submit" disabled={isSending || !email.trim()} className="mt-5 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[var(--forest)] px-5 text-sm font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-50">{isSending ? <LoaderCircle className="size-4 animate-spin" /> : <Mail className="size-4" />}{isSending ? "Sending link…" : "Email me a sign-in link"}</button>
-              <p className="mt-4 text-center text-[11px] leading-5 text-[var(--muted)]">No password required. Sign-in links are only sent to configured household emails.</p>
+              <p className="mt-4 text-center text-[11px] leading-5 text-[var(--muted)]">No password required. Sign-in links are sent to active household members and invited emails.</p>
             </form>
           )}
         </div>

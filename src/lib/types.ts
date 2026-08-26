@@ -3,7 +3,10 @@ export type Priority = "urgent" | "important" | "routine" | "informational";
 
 export type Finding = {
   workItemId?: string;
+  propertyId?: string;
+  propertyName?: string;
   reportId: string;
+  sourceReference?: string;
   title: string;
   category: string;
   area: string;
@@ -67,6 +70,16 @@ export type ReviewActivity = {
   status: ReviewStatus;
   note: string;
   createdAt: string;
+  actorName?: string | null;
+  actorEmail?: string | null;
+};
+
+export type PropertySummary = {
+  id: string;
+  displayName: string;
+  propertyType: string;
+  address: string;
+  timezone: string;
 };
 
 export type InspectionEvidencePage = {
@@ -122,8 +135,11 @@ export type WorkCompletionResult = {
 
 export type HouserWorkspace = {
   accountId: string;
-  propertyId: string;
+  propertyId: string | null;
+  selectedPropertyId: string | "all";
+  properties: PropertySummary[];
   userEmail: string;
+  hasInspectionDocument: boolean;
   seed: InspectionSeed;
   findings: Finding[];
   reviewStatuses: Record<string, ReviewStatus>;

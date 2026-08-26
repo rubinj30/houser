@@ -39,6 +39,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { completeWorkItemAction, createManualWorkItemAction, getInspectionEvidenceAction, getLinkedWorkDocumentsAction, recordReviewUpdateAction, saveDocumentWorkDestinationAction, signOutAction } from "@/app/actions";
 import { createClient as createBrowserClient } from "@/lib/supabase/client";
@@ -54,7 +55,7 @@ import {
   mergeFindings,
   severityLabels,
 } from "@/lib/findings";
-import type { Finding, InspectionEvidence, InspectionSeed, LinkedWorkDocument, LocalWorkItem, ReviewActivity, ReviewStatus, ServiceRecord, Severity, WorkCompletionInput } from "@/lib/types";
+import type { Finding, InspectionEvidence, InspectionSeed, LinkedWorkDocument, LocalWorkItem, PropertySummary, ReviewActivity, ReviewStatus, ServiceRecord, Severity, WorkCompletionInput } from "@/lib/types";
 import { isClosedReviewStatus } from "@/lib/work-status";
 
 type View = "home" | "work" | "timeline" | "assets";
@@ -90,10 +91,10 @@ const navItems: { id: View; label: string; icon: LucideIcon }[] = [
   { id: "assets", label: "Assets", icon: Grid2X2 },
 ];
 
-export function HouserApp({ seed, propertyId, userEmail, initialWorkReportId, initialReviewStatuses, initialReviewActivities, initialServiceRecords }: { seed: InspectionSeed; propertyId: string; userEmail: string; initialWorkReportId: string | null; initialReviewStatuses: Record<string, ReviewStatus>; initialReviewActivities: ReviewActivity[]; initialServiceRecords: ServiceRecord[] }) {
-  const initialWorkItem = seed.findings.find((item) => item.reportId === initialWorkReportId);
+export function HouserApp({ seed, propertyId, selectedPropertyId, properties, userEmail, hasInspectionDocument, initialWorkReportId, initialReviewStatuses, initialReviewActivities, initialServiceRecords }: { seed: InspectionSeed; propertyId: string | null; selectedPropertyId: string | "all"; properties: PropertySummary[]; userEmail: string; hasInspectionDocument: boolean; initialWorkReportId: string | null; initialReviewStatuses: Record<string, ReviewStatus>; initialReviewActivities: ReviewActivity[]; initialServiceRecords: ServiceRecord[] }) {
+  const router = useRouter();
+  const initialWorkItem = seed.findings.find((item) => item.reportId === initialWorkReportId || item.workItemId === initialWorkReportId);
   const [activeView, setActiveView] = useState<View>(initialWorkItem ? "work" : "home");
-  const [property, setProperty] = useState<"ivy" | "rental">("ivy");
   const [isAdding, setIsAdding] = useState(false);
   const [isUploadingInspection, setIsUploadingInspection] = useState(false);
   const [uploadTarget, setUploadTarget] = useState<Finding | null>(null);
@@ -111,6 +112,11 @@ export function HouserApp({ seed, propertyId, userEmail, initialWorkReportId, in
     displayName: seed.property.displayName,
     address: [seed.property.address.line1, seed.property.address.city, seed.property.address.region, seed.property.address.postalCode].filter(Boolean).join(", "),
   }), [seed.property]);
+
+  const selectProperty = (nextPropertyId: string) => {
+    document.cookie = `houser_property=${encodeURIComponent(nextPropertyId)}; path=/; max-age=31536000; samesite=lax`;
+    router.push(`/?property=${encodeURIComponent(nextPropertyId)}`);
+  };
 
   const recordReviewUpdate = async (reportId: string, status: ReviewStatus, note: string) => {
     const item = allFindings.find((finding) => finding.reportId === reportId);
@@ -153,12 +159,10 @@ export function HouserApp({ seed, propertyId, userEmail, initialWorkReportId, in
     <div className="min-h-dvh lg:grid lg:grid-cols-[248px_1fr]">
       <DesktopSidebar activeView={activeView} workCount={currentFindings.length} userEmail={userEmail} onChangeView={changeView} />
       <div className="min-w-0 pb-24 lg:pb-0">
-        <TopBar property={property} userEmail={userEmail} setProperty={setProperty} onAdd={() => setIsAdding(true)} onUpload={() => { setUploadTarget(null); setIsUploadingInspection(true); }} />
+        <TopBar selectedPropertyId={selectedPropertyId} properties={properties} userEmail={userEmail} setProperty={selectProperty} canAdd={Boolean(propertyId)} onAdd={() => setIsAdding(true)} onUpload={() => { setUploadTarget(null); setIsUploadingInspection(true); }} />
         <main className="mx-auto w-full max-w-[1500px] px-4 pb-10 pt-5 sm:px-6 lg:px-10 lg:pb-14 lg:pt-8">
-          {property === "rental" ? (
-            <EmptyRental onSwitch={() => setProperty("ivy")} />
-          ) : activeView === "home" ? (
-            <HomeView seed={seed} findings={currentFindings} onOpenWork={openWork} onUpload={() => { setUploadTarget(null); setIsUploadingInspection(true); }} />
+          {activeView === "home" ? (
+            <HomeView seed={seed} findings={currentFindings} hasInspectionDocument={hasInspectionDocument} canAdd={Boolean(propertyId)} onOpenWork={openWork} onUpload={() => { setUploadTarget(null); setIsUploadingInspection(true); }} />
           ) : activeView === "work" ? (
             <WorkView key={workIntent.revision} findings={allFindings} calendarProperty={calendarProperty} initialCategory={workIntent.category} initialSeverity={workIntent.severity} initialSelectedReportId={workIntent.selectedReportId} reviewStatuses={reviewStatuses} reviewActivities={reviewActivities} serviceRecords={serviceRecords} onRecordReview={recordReviewUpdate} onCompleteWork={completeWorkItem} onAttachDocument={(item) => { setUploadTarget(item); setIsUploadingInspection(true); }} />
           ) : activeView === "timeline" ? (
@@ -168,20 +172,20 @@ export function HouserApp({ seed, propertyId, userEmail, initialWorkReportId, in
           )}
         </main>
       </div>
-      <MobileNav activeView={activeView} onChangeView={changeView} onAdd={() => setIsAdding(true)} />
-      {isAdding ? (
+      <MobileNav activeView={activeView} onChangeView={changeView} canAdd={Boolean(propertyId)} onAdd={() => { if (propertyId) setIsAdding(true); }} />
+      {isAdding && propertyId ? (
         <AddWorkDialog
           seed={seed}
           onClose={() => setIsAdding(false)}
           onUpload={() => { setIsAdding(false); setUploadTarget(null); setIsUploadingInspection(true); }}
           onAdd={async (item) => {
-            const created = await createManualWorkItemAction({ propertyId, title: item.title, category: item.category, area: item.area });
+            const created = await createManualWorkItemAction({ propertyId, title: item.title, description: item.suggestedAction, category: item.category, area: item.area });
             setLocalItems((items) => [created, ...items]);
             setReviewStatuses((current) => ({ ...current, [created.reportId]: "needs_review" }));
           }}
         />
       ) : null}
-      {isUploadingInspection ? <DocumentUploadDialog propertyId={propertyId} seed={seed} findings={allFindings} initialWorkItem={uploadTarget} onClose={() => { setIsUploadingInspection(false); setUploadTarget(null); }} /> : null}
+      {isUploadingInspection && propertyId ? <DocumentUploadDialog propertyId={propertyId} seed={seed} findings={allFindings} initialWorkItem={uploadTarget} onClose={() => { setIsUploadingInspection(false); setUploadTarget(null); }} /> : null}
     </div>
   );
 }
@@ -229,39 +233,40 @@ function DesktopSidebar({ activeView, workCount, userEmail, onChangeView }: { ac
           <p className="mt-2 truncate text-xs text-white/65">{userEmail}</p>
           <p className="mt-1 text-xs leading-5 text-white/45">Status updates and notes are saved privately in Supabase.</p>
         </div>
-        <form action={signOutAction}><button type="submit" className="flex min-h-11 w-full items-center gap-3 rounded-2xl px-4 text-sm font-semibold text-white/60 hover:bg-white/8 hover:text-white"><Settings className="size-[18px]" /> Sign out</button></form>
+        <Link href="/household" className="flex min-h-11 w-full items-center gap-3 rounded-2xl px-4 text-sm font-semibold text-white/60 hover:bg-white/8 hover:text-white"><Settings className="size-[18px]" /> Household</Link>
+        <form action={signOutAction}><button type="submit" className="flex min-h-11 w-full items-center gap-3 rounded-2xl px-4 text-sm font-semibold text-white/60 hover:bg-white/8 hover:text-white"><LogOut className="size-[18px]" /> Sign out</button></form>
       </div>
     </aside>
   );
 }
 
-function TopBar({ property, userEmail, setProperty, onAdd, onUpload }: { property: "ivy" | "rental"; userEmail: string; setProperty: (property: "ivy" | "rental") => void; onAdd: () => void; onUpload: () => void }) {
+function TopBar({ selectedPropertyId, properties, userEmail, setProperty, canAdd, onAdd, onUpload }: { selectedPropertyId: string | "all"; properties: PropertySummary[]; userEmail: string; setProperty: (propertyId: string) => void; canAdd: boolean; onAdd: () => void; onUpload: () => void }) {
   return (
     <header className="sticky top-0 z-30 border-b border-black/6 bg-[rgba(243,241,235,0.88)] px-4 py-3 backdrop-blur-xl sm:px-6 lg:px-10">
       <div className="mx-auto flex max-w-[1500px] items-center justify-between gap-3">
         <div className="lg:hidden"><div className="flex items-center gap-2"><div className="grid size-9 place-items-center rounded-xl bg-[var(--forest-dark)] text-[var(--lime)]"><Home className="size-[18px]" /></div><span className="font-display text-lg font-extrabold tracking-tight">Houser</span></div></div>
-        <PropertySelect property={property} setProperty={setProperty} className="hidden sm:block" />
-        <div className="flex items-center gap-2"><Link href="/chat" className="flex min-h-11 items-center gap-2 rounded-xl border border-[var(--forest)]/15 bg-[var(--mint)]/60 px-3 text-sm font-extrabold text-[var(--forest)] sm:px-4"><MessageCircle className="size-[18px]"/><span className="hidden sm:inline">Ask Houser</span><span className="sr-only sm:hidden">Ask Houser</span></Link><form action={signOutAction} className="lg:hidden"><button type="submit" aria-label={`Sign out ${userEmail}`} className="grid size-11 place-items-center rounded-xl border border-black/8 bg-white/65 text-[var(--muted)]"><LogOut className="size-[18px]" /></button></form><button type="button" onClick={onUpload} className="hidden min-h-11 items-center gap-2 rounded-xl border border-black/8 bg-white/70 px-4 text-sm font-bold text-[var(--forest)] sm:flex"><Upload className="size-[18px]" /> Upload document</button><button type="button" onClick={onAdd} className="hidden min-h-11 items-center gap-2 rounded-xl bg-[var(--forest)] px-4 text-sm font-bold text-white shadow-lg shadow-[#214f3e]/15 transition hover:-translate-y-0.5 hover:bg-[var(--forest-dark)] sm:flex"><Plus className="size-[18px]" /> Add work</button></div>
+        <PropertySelect selectedPropertyId={selectedPropertyId} properties={properties} setProperty={setProperty} className="hidden sm:block" />
+        <div className="flex items-center gap-2"><Link href="/chat" className="flex min-h-11 items-center gap-2 rounded-xl border border-[var(--forest)]/15 bg-[var(--mint)]/60 px-3 text-sm font-extrabold text-[var(--forest)] sm:px-4"><MessageCircle className="size-[18px]"/><span className="hidden sm:inline">Ask Houser</span><span className="sr-only sm:hidden">Ask Houser</span></Link><Link href="/household" className="grid size-11 place-items-center rounded-xl border border-black/8 bg-white/65 text-[var(--muted)] lg:hidden" aria-label="Household settings"><Settings className="size-[18px]"/></Link><form action={signOutAction} className="lg:hidden"><button type="submit" aria-label={`Sign out ${userEmail}`} className="grid size-11 place-items-center rounded-xl border border-black/8 bg-white/65 text-[var(--muted)]"><LogOut className="size-[18px]" /></button></form>{canAdd ? <><button type="button" onClick={onUpload} className="hidden min-h-11 items-center gap-2 rounded-xl border border-black/8 bg-white/70 px-4 text-sm font-bold text-[var(--forest)] sm:flex"><Upload className="size-[18px]" /> Upload document</button><button type="button" onClick={onAdd} className="hidden min-h-11 items-center gap-2 rounded-xl bg-[var(--forest)] px-4 text-sm font-bold text-white shadow-lg shadow-[#214f3e]/15 transition hover:-translate-y-0.5 hover:bg-[var(--forest-dark)] sm:flex"><Plus className="size-[18px]" /> Add work</button></> : null}</div>
       </div>
-      <PropertySelect property={property} setProperty={setProperty} className="mt-3 block sm:hidden" full />
+      <PropertySelect selectedPropertyId={selectedPropertyId} properties={properties} setProperty={setProperty} className="mt-3 block sm:hidden" full />
     </header>
   );
 }
 
-function PropertySelect({ property, setProperty, className, full = false }: { property: "ivy" | "rental"; setProperty: (property: "ivy" | "rental") => void; className: string; full?: boolean }) {
+function PropertySelect({ selectedPropertyId, properties, setProperty, className, full = false }: { selectedPropertyId: string | "all"; properties: PropertySummary[]; setProperty: (propertyId: string) => void; className: string; full?: boolean }) {
   return (
     <label className={`relative ${className}`}>
       <span className="sr-only">Selected property</span>
-      <select value={property} onChange={(event) => setProperty(event.target.value as "ivy" | "rental")} className={`h-11 appearance-none rounded-xl border border-black/8 bg-white/70 py-0 pl-4 pr-10 text-sm font-bold text-[var(--ink)] shadow-sm ${full ? "w-full" : ""}`}>
-        <option value="ivy">Sample Home · Primary residence</option>
-        <option value="rental">Rental property · Set up needed</option>
+      <select value={selectedPropertyId} onChange={(event) => setProperty(event.target.value)} className={`h-11 appearance-none rounded-xl border border-black/8 bg-white/70 py-0 pl-4 pr-10 text-sm font-bold text-[var(--ink)] shadow-sm ${full ? "w-full" : ""}`}>
+        {properties.length > 1 ? <option value="all">All properties</option> : null}
+        {properties.map((property) => <option key={property.id} value={property.id}>{property.displayName} · {property.propertyType.replaceAll("_", " ")}</option>)}
       </select>
       <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-[var(--muted)]" />
     </label>
   );
 }
 
-function HomeView({ seed, findings, onOpenWork, onUpload }: { seed: InspectionSeed; findings: Finding[]; onOpenWork: (intent?: Partial<Omit<WorkIntent, "revision">>) => void; onUpload: () => void }) {
+function HomeView({ seed, findings, hasInspectionDocument, canAdd, onOpenWork, onUpload }: { seed: InspectionSeed; findings: Finding[]; hasInspectionDocument: boolean; canAdd: boolean; onOpenWork: (intent?: Partial<Omit<WorkIntent, "revision">>) => void; onUpload: () => void }) {
   const counts = countBySeverity(findings);
   const categories = groupByCategory(findings).slice(0, 6);
   const safetyItems = findings.filter((item) => item.severity === "safety_hazard").slice(0, 4);
@@ -270,9 +275,9 @@ function HomeView({ seed, findings, onOpenWork, onUpload }: { seed: InspectionSe
     <div>
       <section className="enter flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <div className="mb-2 flex items-center gap-2 text-xs font-extrabold uppercase tracking-[0.14em] text-[var(--forest)]"><CircleDot className="size-3 fill-[var(--lime)]" /> Sample Home · Primary</div>
-          <h1 className="font-display text-[clamp(2rem,5vw,3.5rem)] font-extrabold leading-[1.02] tracking-[-0.055em]">Your house, at a glance.</h1>
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-[var(--muted)] sm:text-base">Review the 2024 inspection, capture what has changed, and turn the remaining items into a clear plan.</p>
+          <div className="mb-2 flex items-center gap-2 text-xs font-extrabold uppercase tracking-[0.14em] text-[var(--forest)]"><CircleDot className="size-3 fill-[var(--lime)]" /> {seed.property.displayName} · {seed.property.kind.replaceAll("_", " ")}</div>
+          <h1 className="font-display text-[clamp(2rem,5vw,3.5rem)] font-extrabold leading-[1.02] tracking-[-0.055em]">{seed.property.kind === "household" ? "Your homes, at a glance." : "Your house, at a glance."}</h1>
+          <p className="mt-3 max-w-2xl text-sm leading-6 text-[var(--muted)] sm:text-base">{seed.property.kind === "household" ? "Review work across every shared property, then choose one house when you want to add something new." : "Review inspection findings, capture what has changed, and turn the remaining items into a clear plan."}</p>
         </div>
         <button type="button" onClick={() => onOpenWork()} className="group flex min-h-11 items-center gap-2 self-start rounded-xl border border-black/8 bg-white px-4 text-sm font-bold surface-shadow sm:self-auto">View all work <ArrowRight className="size-4 transition group-hover:translate-x-0.5" /></button>
       </section>
@@ -284,8 +289,8 @@ function HomeView({ seed, findings, onOpenWork, onUpload }: { seed: InspectionSe
         <SummaryCard label="Tracked assets" value={seed.assets.length} note="From report" icon={HardHat} tone="lime" />
       </section>
 
-      <section className="mt-4 grid gap-4 xl:grid-cols-[1.45fr_0.75fr]">
-        <div className="enter enter-delay-1 grain overflow-hidden rounded-[28px] bg-[var(--forest)] text-white surface-shadow">
+      <section className={`mt-4 grid gap-4 ${hasInspectionDocument || !canAdd ? "" : "xl:grid-cols-[1.45fr_0.75fr]"}`}>
+        {hasInspectionDocument || !canAdd ? null : <div className="enter enter-delay-1 grain overflow-hidden rounded-[28px] bg-[var(--forest)] text-white surface-shadow">
           <div className="grid min-h-[260px] gap-6 p-6 sm:grid-cols-[1fr_auto] sm:p-8">
             <div className="flex flex-col justify-between">
               <div>
@@ -297,7 +302,7 @@ function HomeView({ seed, findings, onOpenWork, onUpload }: { seed: InspectionSe
             </div>
             <ReportIllustration />
           </div>
-        </div>
+        </div>}
 
         <div className="enter enter-delay-2 rounded-[28px] border border-black/6 bg-[var(--paper)] p-6 surface-shadow sm:p-7">
           <div className="flex items-start justify-between"><div><p className="text-xs font-extrabold uppercase tracking-[0.14em] text-[var(--muted)]">Property health</p><div className="font-display mt-2 text-5xl font-extrabold tracking-[-0.06em]">—</div></div><div className="grid size-11 place-items-center rounded-2xl bg-[var(--mint)] text-[var(--forest)]"><Sparkles className="size-5" /></div></div>
@@ -396,7 +401,7 @@ function WorkView({ findings, calendarProperty, initialCategory, initialSeverity
 
 function FindingCard({ item, status, menuOpen, onOpen, onToggleMenu, onSetStatus }: { item: Finding; status: ReviewStatus; menuOpen: boolean; onOpen: () => void; onToggleMenu: () => void; onSetStatus: (status: ReviewStatus) => void }) {
   const tone = item.severity === "safety_hazard" ? "bg-[#f8ddd7] text-[#96382d]" : item.severity === "maintenance_item" ? "bg-[#f9e6c8] text-[#84581b]" : "bg-[var(--mint)] text-[var(--forest)]";
-  return <article className="group relative rounded-[22px] border border-black/6 bg-[var(--paper)] p-5 transition hover:-translate-y-0.5 hover:border-[var(--forest)]/20 surface-shadow"><div className="flex items-start gap-3"><div className={`grid size-10 shrink-0 place-items-center rounded-[14px] ${tone}`}>{item.severity === "safety_hazard" ? <AlertTriangle className="size-[18px]"/> : item.severity === "maintenance_item" ? <Clock3 className="size-[18px]"/> : <ClipboardCheck className="size-[18px]"/>}</div><button type="button" onClick={onOpen} className="min-w-0 flex-1 text-left"><div className="flex flex-wrap gap-2"><span className="text-[10px] font-extrabold uppercase tracking-[0.1em] text-[var(--muted)]">{item.reportId} · {item.category}</span>{"isLocal" in item ? <span className="rounded-full bg-[var(--lime)] px-2 text-[9px] font-extrabold uppercase">New</span> : null}</div><h2 className="mt-1 text-[15px] font-extrabold leading-5 group-hover:text-[var(--forest)]">{item.title}</h2></button><div className="relative"><button type="button" onClick={onToggleMenu} aria-label={`More options for ${item.title}`} aria-expanded={menuOpen} className="grid size-9 shrink-0 place-items-center rounded-xl text-[var(--muted)] hover:bg-black/5"><MoreHorizontal className="size-5"/></button>{menuOpen ? <FindingMenu onOpen={onOpen} onSetStatus={onSetStatus} /> : null}</div></div><button type="button" onClick={onOpen} className="block w-full text-left"><p className="mt-4 text-sm leading-6 text-[var(--muted)]">{item.suggestedAction}</p><div className="mt-4 flex flex-wrap items-center gap-2"><span className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold ${tone}`}>{severityLabels[item.severity]}</span><span className="rounded-full bg-black/5 px-2.5 py-1 text-[10px] font-extrabold text-[var(--muted)]">{item.area}</span><ReviewStatusPill status={status} /></div></button><div className="mt-4 flex items-center justify-between border-t border-black/6 pt-3"><button type="button" onClick={onOpen} className="flex items-center gap-1.5 text-[11px] font-bold text-[var(--muted)] hover:text-[var(--forest)]"><ImageIcon className="size-3.5"/> {item.sourcePages.length ? formatSourcePages(item.sourcePages) : "Manual entry"}</button><button type="button" onClick={onOpen} className="min-h-9 rounded-lg px-2 text-xs font-extrabold text-[var(--forest)] hover:bg-[var(--mint)]">Review item</button></div></article>;
+  return <article className="group relative rounded-[22px] border border-black/6 bg-[var(--paper)] p-5 transition hover:-translate-y-0.5 hover:border-[var(--forest)]/20 surface-shadow"><div className="flex items-start gap-3"><div className={`grid size-10 shrink-0 place-items-center rounded-[14px] ${tone}`}>{item.severity === "safety_hazard" ? <AlertTriangle className="size-[18px]"/> : item.severity === "maintenance_item" ? <Clock3 className="size-[18px]"/> : <ClipboardCheck className="size-[18px]"/>}</div><button type="button" onClick={onOpen} className="min-w-0 flex-1 text-left"><div className="flex flex-wrap gap-2"><span className="text-[10px] font-extrabold uppercase tracking-[0.1em] text-[var(--muted)]">{item.sourceReference ?? item.reportId} · {item.category}</span>{item.propertyName ? <span className="rounded-full bg-black/5 px-2 text-[9px] font-extrabold">{item.propertyName}</span> : null}{"isLocal" in item ? <span className="rounded-full bg-[var(--lime)] px-2 text-[9px] font-extrabold uppercase">New</span> : null}</div><h2 className="mt-1 text-[15px] font-extrabold leading-5 group-hover:text-[var(--forest)]">{item.title}</h2></button><div className="relative"><button type="button" onClick={onToggleMenu} aria-label={`More options for ${item.title}`} aria-expanded={menuOpen} className="grid size-9 shrink-0 place-items-center rounded-xl text-[var(--muted)] hover:bg-black/5"><MoreHorizontal className="size-5"/></button>{menuOpen ? <FindingMenu onOpen={onOpen} onSetStatus={onSetStatus} /> : null}</div></div><button type="button" onClick={onOpen} className="block w-full text-left"><p className="mt-4 text-sm leading-6 text-[var(--muted)]">{item.suggestedAction}</p><div className="mt-4 flex flex-wrap items-center gap-2"><span className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold ${tone}`}>{severityLabels[item.severity]}</span><span className="rounded-full bg-black/5 px-2.5 py-1 text-[10px] font-extrabold text-[var(--muted)]">{item.area}</span><ReviewStatusPill status={status} /></div></button><div className="mt-4 flex items-center justify-between border-t border-black/6 pt-3"><button type="button" onClick={onOpen} className="flex items-center gap-1.5 text-[11px] font-bold text-[var(--muted)] hover:text-[var(--forest)]"><ImageIcon className="size-3.5"/> {item.sourcePages.length ? formatSourcePages(item.sourcePages) : "Manual entry"}</button><button type="button" onClick={onOpen} className="min-h-9 rounded-lg px-2 text-xs font-extrabold text-[var(--forest)] hover:bg-[var(--mint)]">Review item</button></div></article>;
 }
 
 function FindingMenu({ onOpen, onSetStatus }: { onOpen: () => void; onSetStatus: (status: ReviewStatus) => void }) {
@@ -466,7 +471,7 @@ function FindingReviewDialog({ item, calendarProperty, status, activities, servi
       <section role="dialog" aria-modal="true" aria-labelledby="finding-review-title" className="max-h-[92dvh] w-full overflow-y-auto rounded-t-[28px] bg-[var(--paper)] shadow-2xl sm:h-full sm:max-h-none sm:max-w-xl sm:rounded-[28px]">
         <div className="sticky top-0 z-10 flex items-start justify-between border-b border-black/6 bg-[rgba(252,251,248,0.94)] p-5 backdrop-blur-xl sm:p-7">
           <div className="pr-4">
-            <p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--forest)]">{item.reportId} · {item.category}</p>
+            <p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--forest)]">{item.sourceReference ?? item.reportId} · {item.category}{item.propertyName ? ` · ${item.propertyName}` : ""}</p>
             <h2 id="finding-review-title" className="font-display mt-2 text-2xl font-extrabold leading-tight tracking-[-0.04em]">{item.title}</h2>
             <div className="mt-3"><ReviewStatusPill status={status} /></div>
           </div>
@@ -627,7 +632,7 @@ function formatMoney(minor: number, currency: string) {
 }
 
 function ActivityHistory({ activities }: { activities: ReviewActivity[] }) {
-  return <section><div className="flex items-center gap-2"><MessageSquareText className="size-4 text-[var(--forest)]"/><p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--muted)]">Activity history</p></div>{activities.length ? <ol className="mt-3 space-y-3">{activities.map((activity) => <li key={activity.id} className="rounded-[18px] border border-black/6 bg-white/65 p-4"><div className="flex flex-wrap items-center justify-between gap-2"><ReviewStatusPill status={activity.status} /><time className="text-[10px] font-bold text-[var(--muted)]" dateTime={activity.createdAt}>{formatActivityDate(activity.createdAt)}</time></div>{activity.note ? <p className="mt-3 whitespace-pre-wrap text-sm leading-6">{activity.note}</p> : <p className="mt-3 text-xs italic text-[var(--muted)]">Status updated without a note.</p>}</li>)}</ol> : <div className="mt-3 rounded-[18px] border border-dashed border-black/10 p-4 text-sm text-[var(--muted)]">No updates recorded yet.</div>}</section>;
+  return <section><div className="flex items-center gap-2"><MessageSquareText className="size-4 text-[var(--forest)]"/><p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--muted)]">Activity history</p></div>{activities.length ? <ol className="mt-3 space-y-3">{activities.map((activity) => <li key={activity.id} className="rounded-[18px] border border-black/6 bg-white/65 p-4"><div className="flex flex-wrap items-center justify-between gap-2"><ReviewStatusPill status={activity.status} /><time className="text-[10px] font-bold text-[var(--muted)]" dateTime={activity.createdAt}>{formatActivityDate(activity.createdAt)}</time></div>{activity.note ? <p className="mt-3 whitespace-pre-wrap text-sm leading-6">{activity.note}</p> : <p className="mt-3 text-xs italic text-[var(--muted)]">Status updated without a note.</p>}<p className="mt-2 text-[10px] font-bold text-[var(--muted)]">Updated by {activity.actorName ?? activity.actorEmail ?? "a household member"}</p></li>)}</ol> : <div className="mt-3 rounded-[18px] border border-dashed border-black/10 p-4 text-sm text-[var(--muted)]">No updates recorded yet.</div>}</section>;
 }
 
 function formatActivityDate(value: string) {
@@ -676,7 +681,7 @@ function TimelineView({ findings, calendarProperty, reviewStatuses, reviewActivi
 
 function TimelineGroup({ label, note, color, items, reviewStatuses, onOpen }: { label: string; note: string; color: "rose" | "amber" | "forest"; items: Finding[]; reviewStatuses: Record<string, ReviewStatus>; onOpen: (item: Finding) => void }) {
   const colors = { rose: "bg-[var(--rose)]", amber: "bg-[var(--amber)]", forest: "bg-[var(--forest)]" };
-  return <section className="grid gap-4 sm:grid-cols-[150px_1fr]"><div><div className="flex items-center gap-2"><div className={`size-2.5 rounded-full ${colors[color]}`}/><h2 className="font-display text-base font-extrabold">{label}</h2></div><p className="ml-[18px] mt-1 text-xs leading-5 text-[var(--muted)]">{note}</p></div><div className="relative space-y-3 before:absolute before:-left-[22px] before:top-2 before:h-[calc(100%-16px)] before:w-px before:bg-black/10">{items.map((item) => <button type="button" key={item.reportId} onClick={() => onOpen(item)} className="group block w-full rounded-[20px] border border-black/6 bg-[var(--paper)] p-4 text-left transition hover:-translate-y-0.5 hover:border-[var(--forest)]/20 surface-shadow"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="text-[10px] font-extrabold uppercase tracking-[0.1em] text-[var(--muted)]">{item.category} · {item.reportId}</div><h3 className="mt-1 text-sm font-extrabold group-hover:text-[var(--forest)]">{item.title}</h3><p className="mt-1 text-xs text-[var(--muted)]">{item.targetStartOn ? formatTargetWindow(item) : item.location}</p><div className="mt-2"><ReviewStatusPill status={reviewStatuses[item.reportId] ?? "needs_review"} /></div></div><ArrowRight className="mt-1 size-4 shrink-0 text-[var(--muted)] transition group-hover:translate-x-0.5 group-hover:text-[var(--forest)]"/></div></button>)}</div></section>;
+  return <section className="grid gap-4 sm:grid-cols-[150px_1fr]"><div><div className="flex items-center gap-2"><div className={`size-2.5 rounded-full ${colors[color]}`}/><h2 className="font-display text-base font-extrabold">{label}</h2></div><p className="ml-[18px] mt-1 text-xs leading-5 text-[var(--muted)]">{note}</p></div><div className="relative space-y-3 before:absolute before:-left-[22px] before:top-2 before:h-[calc(100%-16px)] before:w-px before:bg-black/10">{items.map((item) => <button type="button" key={item.reportId} onClick={() => onOpen(item)} className="group block w-full rounded-[20px] border border-black/6 bg-[var(--paper)] p-4 text-left transition hover:-translate-y-0.5 hover:border-[var(--forest)]/20 surface-shadow"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="text-[10px] font-extrabold uppercase tracking-[0.1em] text-[var(--muted)]">{item.category} · {item.sourceReference ?? item.reportId}{item.propertyName ? ` · ${item.propertyName}` : ""}</div><h3 className="mt-1 text-sm font-extrabold group-hover:text-[var(--forest)]">{item.title}</h3><p className="mt-1 text-xs text-[var(--muted)]">{item.targetStartOn ? formatTargetWindow(item) : item.location}</p><div className="mt-2"><ReviewStatusPill status={reviewStatuses[item.reportId] ?? "needs_review"} /></div></div><ArrowRight className="mt-1 size-4 shrink-0 text-[var(--muted)] transition group-hover:translate-x-0.5 group-hover:text-[var(--forest)]"/></div></button>)}</div></section>;
 }
 
 function AssetsView({ seed }: { seed: InspectionSeed }) {
@@ -688,17 +693,13 @@ function PageHeading({ eyebrow, title, description }: { eyebrow: string; title: 
   return <header><p className="text-xs font-extrabold uppercase tracking-[0.14em] text-[var(--forest)]">{eyebrow}</p><h1 className="font-display mt-2 text-3xl font-extrabold tracking-[-0.05em] sm:text-4xl">{title}</h1><p className="mt-3 max-w-2xl text-sm leading-6 text-[var(--muted)] sm:text-base">{description}</p></header>;
 }
 
-function MobileNav({ activeView, onChangeView, onAdd }: { activeView: View; onChangeView: (view: View) => void; onAdd: () => void }) {
-  return <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-black/8 bg-[rgba(252,251,248,0.94)] px-2 pb-[max(8px,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl lg:hidden" aria-label="Mobile navigation">{navItems.slice(0, 2).map((item) => <MobileNavButton key={item.id} item={item} active={activeView === item.id} onClick={() => onChangeView(item.id)} />)}<button type="button" onClick={onAdd} className="mx-auto -mt-7 grid size-14 place-items-center rounded-[20px] bg-[var(--forest)] text-white shadow-xl shadow-[#214f3e]/25" aria-label="Add work"><Plus className="size-6"/></button>{navItems.slice(2).map((item) => <MobileNavButton key={item.id} item={item} active={activeView === item.id} onClick={() => onChangeView(item.id)} />)}</nav>;
+function MobileNav({ activeView, onChangeView, canAdd, onAdd }: { activeView: View; onChangeView: (view: View) => void; canAdd: boolean; onAdd: () => void }) {
+  return <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-black/8 bg-[rgba(252,251,248,0.94)] px-2 pb-[max(8px,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl lg:hidden" aria-label="Mobile navigation">{navItems.slice(0, 2).map((item) => <MobileNavButton key={item.id} item={item} active={activeView === item.id} onClick={() => onChangeView(item.id)} />)}<button type="button" onClick={onAdd} disabled={!canAdd} className="mx-auto -mt-7 grid size-14 place-items-center rounded-[20px] bg-[var(--forest)] text-white shadow-xl shadow-[#214f3e]/25 disabled:cursor-not-allowed disabled:bg-[var(--muted)] disabled:opacity-55" aria-label={canAdd ? "Add work" : "Choose a property to add work"}><Plus className="size-6"/></button>{navItems.slice(2).map((item) => <MobileNavButton key={item.id} item={item} active={activeView === item.id} onClick={() => onChangeView(item.id)} />)}</nav>;
 }
 
 function MobileNavButton({ item, active, onClick }: { item: (typeof navItems)[number]; active: boolean; onClick: () => void }) {
   const Icon = item.icon;
   return <button type="button" onClick={onClick} className={`flex min-h-12 flex-col items-center justify-center gap-1 text-[10px] font-extrabold ${active ? "text-[var(--forest)]" : "text-[var(--muted)]"}`} aria-current={active ? "page" : undefined}><Icon className="size-5" strokeWidth={active ? 2.5 : 1.9}/>{item.label}</button>;
-}
-
-function EmptyRental({ onSwitch }: { onSwitch: () => void }) {
-  return <div className="mx-auto mt-8 max-w-xl rounded-[28px] border border-dashed border-black/15 bg-white/50 p-8 text-center sm:p-12"><div className="mx-auto grid size-14 place-items-center rounded-[20px] bg-[var(--mint)] text-[var(--forest)]"><Home className="size-6"/></div><h1 className="font-display mt-5 text-2xl font-extrabold tracking-tight">Set up the rental property</h1><p className="mt-3 text-sm leading-6 text-[var(--muted)]">When you share the second inspection report, this property can be seeded the same way as Sample Home.</p><button type="button" onClick={onSwitch} className="mt-6 min-h-11 rounded-xl bg-[var(--forest)] px-5 text-sm font-extrabold text-white">Return to Sample Home</button></div>;
 }
 
 type UploadPhase = "select" | "uploading" | "analyzing" | "review" | "importing";
@@ -917,6 +918,7 @@ function PhotoUploadReview({ result, findings, categories, areas, initialWorkIte
 function AddWorkDialog({ seed, onClose, onAdd, onUpload }: { seed: InspectionSeed; onClose: () => void; onAdd: (item: LocalWorkItem) => Promise<void>; onUpload: () => void }) {
   const categories = [...new Set(seed.findings.map((item) => item.category))].sort();
   const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
   const [category, setCategory] = useState(categories[0] ?? "General");
   const [area, setArea] = useState(seed.areas[0] ?? "General");
   const [isSaving, setIsSaving] = useState(false);
@@ -928,7 +930,7 @@ function AddWorkDialog({ seed, onClose, onAdd, onUpload }: { seed: InspectionSee
     setIsSaving(true);
     setSaveError("");
     try {
-      await onAdd({ reportId: `manual-${Date.now()}`, title: title.trim(), category, area, workType: "other", severity: "recommendation", priority: "routine", location: area, suggestedAction: "Review this manually added work item and add scheduling details.", sourcePages: [], isLocal: true });
+      await onAdd({ reportId: `manual-${Date.now()}`, title: title.trim(), category, area, workType: "other", severity: "recommendation", priority: "routine", location: area, suggestedAction: description.trim(), sourcePages: [], isLocal: true });
       onClose();
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : "The work item could not be saved.");
@@ -937,5 +939,5 @@ function AddWorkDialog({ seed, onClose, onAdd, onUpload }: { seed: InspectionSee
     }
   };
 
-  return <div className="fixed inset-0 z-50 grid items-end bg-[#0d1e17]/45 p-0 backdrop-blur-sm sm:place-items-center sm:p-6" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}><div role="dialog" aria-modal="true" aria-labelledby="add-work-title" className="w-full rounded-t-[28px] bg-[var(--paper)] p-5 shadow-2xl sm:max-w-lg sm:rounded-[28px] sm:p-7"><div className="flex items-start justify-between"><div><p className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-[var(--forest)]">Quick capture</p><h2 id="add-work-title" className="font-display mt-1 text-2xl font-extrabold tracking-tight">Add work</h2></div><button type="button" onClick={onClose} className="grid size-10 place-items-center rounded-xl bg-black/5" aria-label="Close"><X className="size-5"/></button></div><button type="button" onClick={onUpload} className="mt-5 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-[var(--forest)]/20 bg-[var(--mint)]/50 text-sm font-extrabold text-[var(--forest)]"><Upload className="size-[18px]" /> Upload a document</button><div className="my-5 flex items-center gap-3 text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--muted)]"><span className="h-px flex-1 bg-black/8" />or add one item<span className="h-px flex-1 bg-black/8" /></div><form onSubmit={submit} className="space-y-4"><label className="block"><span className="text-xs font-extrabold">What needs to be done?</span><input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Service upstairs furnace" className="mt-2 h-12 w-full rounded-xl border border-black/10 bg-white px-4 text-sm"/></label><div className="grid gap-4 sm:grid-cols-2"><label><span className="text-xs font-extrabold">Category</span><select value={category} onChange={(event) => setCategory(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-black/10 bg-white px-3 text-sm">{categories.map((name) => <option key={name}>{name}</option>)}</select></label><label><span className="text-xs font-extrabold">Area</span><select value={area} onChange={(event) => setArea(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-black/10 bg-white px-3 text-sm">{seed.areas.map((name) => <option key={name}>{name}</option>)}</select></label></div><button type="button" className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-dashed border-black/15 text-sm font-bold text-[var(--muted)]"><Camera className="size-[18px]"/> Add photo or screenshot</button>{saveError ? <p role="alert" className="rounded-xl bg-[#f8ddd7] px-3 py-2 text-xs font-bold text-[#8c3328]">{saveError}</p> : null}<button type="submit" disabled={!title.trim() || isSaving} className="min-h-12 w-full rounded-xl bg-[var(--forest)] text-sm font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-40">{isSaving ? "Saving…" : "Save to work inbox"}</button></form></div></div>;
+  return <div className="fixed inset-0 z-50 grid items-end bg-[#0d1e17]/45 p-0 backdrop-blur-sm sm:place-items-center sm:p-6" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}><div role="dialog" aria-modal="true" aria-labelledby="add-work-title" className="max-h-[94dvh] w-full overflow-y-auto rounded-t-[28px] bg-[var(--paper)] p-5 shadow-2xl sm:max-w-lg sm:rounded-[28px] sm:p-7"><div className="flex items-start justify-between"><div><p className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-[var(--forest)]">Quick capture</p><h2 id="add-work-title" className="font-display mt-1 text-2xl font-extrabold tracking-tight">Add work</h2></div><button type="button" onClick={onClose} className="grid size-10 place-items-center rounded-xl bg-black/5" aria-label="Close"><X className="size-5"/></button></div><button type="button" onClick={onUpload} className="mt-5 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-[var(--forest)]/20 bg-[var(--mint)]/50 text-sm font-extrabold text-[var(--forest)]"><Upload className="size-[18px]" /> Upload a document</button><div className="my-5 flex items-center gap-3 text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--muted)]"><span className="h-px flex-1 bg-black/8" />or add one item<span className="h-px flex-1 bg-black/8" /></div><form onSubmit={submit} className="space-y-4"><label className="block"><span className="text-xs font-extrabold">What needs to be done?</span><input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Service upstairs furnace" className="mt-2 h-12 w-full rounded-xl border border-black/10 bg-white px-4 text-sm"/></label><label className="block"><span className="text-xs font-extrabold">Description <span className="font-normal text-[var(--muted)]">(optional)</span></span><textarea value={description} onChange={(event) => setDescription(event.target.value)} maxLength={5000} rows={3} placeholder="Add useful details, symptoms, or next steps" className="mt-2 w-full resize-y rounded-xl border border-black/10 bg-white px-4 py-3 text-sm leading-6"/></label><div className="grid gap-4 sm:grid-cols-2"><label><span className="text-xs font-extrabold">Category</span><select value={category} onChange={(event) => setCategory(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-black/10 bg-white px-3 text-sm">{categories.map((name) => <option key={name}>{name}</option>)}</select></label><label><span className="text-xs font-extrabold">Area</span><select value={area} onChange={(event) => setArea(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-black/10 bg-white px-3 text-sm">{seed.areas.map((name) => <option key={name}>{name}</option>)}</select></label></div><button type="button" className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-dashed border-black/15 text-sm font-bold text-[var(--muted)]"><Camera className="size-[18px]"/> Add photo or screenshot</button>{saveError ? <p role="alert" className="rounded-xl bg-[#f8ddd7] px-3 py-2 text-xs font-bold text-[#8c3328]">{saveError}</p> : null}<button type="submit" disabled={!title.trim() || isSaving} className="min-h-12 w-full rounded-xl bg-[var(--forest)] text-sm font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-40">{isSaving ? "Saving…" : "Save to work inbox"}</button></form></div></div>;
 }

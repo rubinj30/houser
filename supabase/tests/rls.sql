@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(40);
+select plan(52);
 
 insert into auth.users (
   instance_id, id, aud, role, email, encrypted_password,
@@ -9,7 +9,13 @@ insert into auth.users (
 )
 values
   ('00000000-0000-0000-0000-000000000000', '10000000-0000-0000-0000-000000000001', 'authenticated', 'authenticated', 'owner-a@example.test', '', now(), '{}', '{}', now(), now()),
-  ('00000000-0000-0000-0000-000000000000', '20000000-0000-0000-0000-000000000002', 'authenticated', 'authenticated', 'owner-b@example.test', '', now(), '{}', '{}', now(), now());
+  ('00000000-0000-0000-0000-000000000000', '20000000-0000-0000-0000-000000000002', 'authenticated', 'authenticated', 'owner-b@example.test', '', now(), '{}', '{}', now(), now()),
+  ('00000000-0000-0000-0000-000000000000', '30000000-0000-0000-0000-000000000003', 'authenticated', 'authenticated', 'member-a@example.test', '', now(), '{}', '{}', now(), now());
+
+insert into public.profiles (id, email)
+values
+  ('10000000-0000-0000-0000-000000000001', 'owner-a@example.test'),
+  ('20000000-0000-0000-0000-000000000002', 'owner-b@example.test');
 
 insert into public.accounts (id, name)
 values
@@ -265,6 +271,91 @@ select throws_ok(
   'P0001',
   null,
   'another account cannot create a service record for the first account'
+);
+
+select set_config('request.jwt.claims', '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated","email":"owner-a@example.test"}', true);
+
+select lives_ok(
+  $$ select public.create_account_invitation('a0000000-0000-0000-0000-000000000001', 'member-a@example.test', 'contributor') $$,
+  'an owner can invite a household member'
+);
+
+select results_eq(
+  $$ select email from public.account_invitations where account_id = 'a0000000-0000-0000-0000-000000000001' and status = 'pending' $$,
+  array['member-a@example.test'::text],
+  'the owner can read the pending household invitation'
+);
+
+select set_config('request.jwt.claims', '{"sub":"30000000-0000-0000-0000-000000000003","role":"authenticated","email":"member-a@example.test"}', true);
+
+select results_eq(
+  $$ select public.accept_account_invitations() $$,
+  array[1],
+  'an invited user can accept their matching email invitation'
+);
+
+select results_eq(
+  $$ select role from public.account_memberships where account_id = 'a0000000-0000-0000-0000-000000000001' and user_id = '30000000-0000-0000-0000-000000000003' $$,
+  array['contributor'::text],
+  'invitation acceptance creates the requested membership role'
+);
+
+select results_eq(
+  $$ select display_name from public.properties order by display_name $$,
+  array['Property A'::text],
+  'a household member can read every property in the account'
+);
+
+select lives_ok(
+  $$ insert into public.work_items (property_id, title, created_by) values ('a1000000-0000-0000-0000-000000000001', 'Member-created work', '30000000-0000-0000-0000-000000000003') $$,
+  'a contributor can create work in a household property'
+);
+
+select throws_ok(
+  $$ select public.create_account_invitation('a0000000-0000-0000-0000-000000000001', 'other@example.test', 'viewer') $$,
+  'P0001',
+  null,
+  'a contributor cannot invite another member'
+);
+
+select set_config('request.jwt.claims', '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated","email":"owner-a@example.test"}', true);
+
+select lives_ok(
+  $$ select public.update_account_member_role('a0000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000003', 'viewer') $$,
+  'an owner can change a household member role'
+);
+
+select set_config('request.jwt.claims', '{"sub":"30000000-0000-0000-0000-000000000003","role":"authenticated","email":"member-a@example.test"}', true);
+
+select throws_ok(
+  $$ insert into public.work_items (property_id, title, created_by) values ('a1000000-0000-0000-0000-000000000001', 'Viewer-created work', '30000000-0000-0000-0000-000000000003') $$,
+  '42501',
+  null,
+  'a viewer cannot create work'
+);
+
+select set_config('request.jwt.claims', '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated","email":"owner-a@example.test"}', true);
+
+select lives_ok(
+  $$ select public.remove_account_member('a0000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000003') $$,
+  'an owner can remove a household member'
+);
+
+select set_config('request.jwt.claims', '{"sub":"30000000-0000-0000-0000-000000000003","role":"authenticated","email":"member-a@example.test"}', true);
+
+select results_eq(
+  $$ select count(*)::bigint from public.properties $$,
+  array[0::bigint],
+  'a removed household member immediately loses property access'
+);
+
+select set_config('request.jwt.claims', '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated","email":"owner-a@example.test"}', true);
+
+select throws_ok(
+  $$ select public.remove_account_member('a0000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001') $$,
+  'P0001',
+  null,
+  'the final household owner cannot remove themselves'
 );
 
 reset role;

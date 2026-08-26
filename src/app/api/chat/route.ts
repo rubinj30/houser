@@ -35,6 +35,7 @@ export async function POST(request: Request) {
       if (!item) return [];
       return [{
         id: item.id,
+        propertyId: item.propertyId,
         reference: item.reference,
         title: item.title,
         property: item.property,

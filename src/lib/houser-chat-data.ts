@@ -139,6 +139,7 @@ export async function getHouserChatData(question = "") {
 
   const workItems = (workResult.data ?? []).map((item) => ({
     id: item.id,
+    propertyId: item.property_id,
     reference: item.source_section ?? item.source_key ?? item.id,
     property: propertyNames.get(item.property_id) ?? "Unknown property",
     title: item.title,

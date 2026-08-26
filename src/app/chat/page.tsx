@@ -13,5 +13,5 @@ export default async function ChatPage() {
   const workspace = await getHouserWorkspace();
   if (!workspace) redirect("/");
 
-  return <HouserChat userEmail={email} propertyName={workspace.seed.property.displayName} />;
+  return <HouserChat userEmail={email} propertyName={workspace.properties.length > 1 ? "All household properties" : workspace.seed.property.displayName} />;
 }

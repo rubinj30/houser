@@ -50,6 +50,7 @@ async function resolveCategoryAndArea(
 function workResponse(row: Record<string, unknown>) {
   return {
     id: row.id,
+    propertyId: row.property_id,
     reference: row.source_section ?? row.source_key ?? row.id,
     title: row.title,
     category: relatedName(row.categories),
@@ -88,7 +89,7 @@ async function createWorkItem(
     completed_at: action.status === "completed" ? new Date().toISOString() : null,
     created_by: userId,
     updated_by: userId,
-  }).select("id,source_key,source_section,title,status,priority,target_start_on,target_end_on,categories(name),areas(name)").single();
+  }).select("id,property_id,source_key,source_section,title,status,priority,target_start_on,target_end_on,categories(name),areas(name)").single();
   if (error) throw error;
 
   const { error: activityError } = await supabase.from("activity_events").insert({
@@ -139,7 +140,7 @@ async function updateWorkItem(
   const { data: row, error } = await supabase.from("work_items").update(changes)
     .eq("id", current.id)
     .eq("updated_at", action.expectedUpdatedAt)
-    .select("id,source_key,source_section,title,status,priority,target_start_on,target_end_on,categories(name),areas(name)")
+    .select("id,property_id,source_key,source_section,title,status,priority,target_start_on,target_end_on,categories(name),areas(name)")
     .maybeSingle();
   if (error) throw error;
   if (!row) throw new Error("That work item changed before the update was saved. Ask Houser to try again.");

@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { isHouserEmailAllowed } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import type { InspectionEvidence, InspectionSeed, LinkedWorkDocument, LocalWorkItem, ReviewActivity, ReviewStatus, WorkCompletionInput, WorkCompletionResult } from "@/lib/types";
 import { databaseStatusToReview, reviewStatusToDatabase } from "@/lib/work-status";
@@ -21,6 +22,7 @@ const evidenceRequestSchema = z.object({ workItemId: z.uuid() });
 const manualWorkSchema = z.object({
   propertyId: z.uuid(),
   title: z.string().trim().min(1).max(240),
+  description: z.string().trim().max(5000),
   category: z.string().trim().min(1).max(100),
   area: z.string().trim().min(1).max(120),
 });
@@ -108,9 +110,11 @@ export async function requestMagicLinkAction(input: { email: string }) {
   if (process.env.NODE_ENV === "production" && allowedEmails.length === 0) {
     throw new Error("Houser sign-in is not configured yet.");
   }
-  if (allowedEmails.length > 0 && !allowedEmails.includes(normalizedEmail)) {
+  const hasHouseholdAccess = await isHouserEmailAllowed(normalizedEmail);
+  if (allowedEmails.length > 0 && !allowedEmails.includes(normalizedEmail) && !hasHouseholdAccess) {
     return { sent: true };
   }
+  if (allowedEmails.length === 0 && !hasHouseholdAccess) return { sent: true };
 
   const requestHeaders = await headers();
   const requestOrigin = requestHeaders.get("origin");
@@ -396,6 +400,7 @@ export async function completeWorkItemAction(input: WorkCompletionInput): Promis
 export async function createManualWorkItemAction(input: {
   propertyId: string;
   title: string;
+  description: string;
   category: string;
   area: string;
 }): Promise<LocalWorkItem> {
@@ -406,7 +411,7 @@ export async function createManualWorkItemAction(input: {
     supabase.from("areas").select("id,name").eq("property_id", values.propertyId).eq("name", values.area).maybeSingle(),
   ]);
   const reportId = `manual-${crypto.randomUUID()}`;
-  const description = "Review this manually added work item and add scheduling details.";
+  const description = values.description || "Review this manually added work item and add scheduling details.";
   const { data: workItem, error } = await supabase
     .from("work_items")
     .insert({
