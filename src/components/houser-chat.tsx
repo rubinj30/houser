@@ -25,6 +25,11 @@ type ChatMessage = {
   suggestedQuestions?: string[];
 };
 
+type ChatError = {
+  message: string;
+  actionUrl?: string;
+};
+
 const starterQuestions = [
   "Are there any urgent items that need attention?",
   "Is anything needed for my A/C?",
@@ -48,7 +53,7 @@ export function HouserChat({ userEmail, propertyName }: { userEmail: string; pro
   }]);
   const [draft, setDraft] = useState("");
   const [isSending, setIsSending] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<ChatError | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -62,7 +67,7 @@ export function HouserChat({ userEmail, propertyName }: { userEmail: string; pro
     const nextMessages = [...messages, userMessage];
     setMessages(nextMessages);
     setDraft("");
-    setError("");
+    setError(null);
     setIsSending(true);
 
     try {
@@ -77,7 +82,13 @@ export function HouserChat({ userEmail, propertyName }: { userEmail: string; pro
         }),
       });
       const result = await response.json();
-      if (!response.ok) throw new Error(result.error ?? "Houser could not answer that question.");
+      if (!response.ok) {
+        setError({
+          message: result.error ?? "Houser could not answer that question.",
+          actionUrl: typeof result.actionUrl === "string" ? result.actionUrl : undefined,
+        });
+        return;
+      }
       setMessages((current) => [...current, {
         id: crypto.randomUUID(),
         role: "assistant",
@@ -87,7 +98,7 @@ export function HouserChat({ userEmail, propertyName }: { userEmail: string; pro
         suggestedQuestions: result.suggestedQuestions,
       }]);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Houser could not answer that question.");
+      setError({ message: cause instanceof Error ? cause.message : "Houser could not answer that question." });
     } finally {
       setIsSending(false);
     }
@@ -119,7 +130,7 @@ export function HouserChat({ userEmail, propertyName }: { userEmail: string; pro
 
         {messages.length === 1 ? <section className="mx-auto max-w-2xl pt-2"><p className="text-center text-[10px] font-extrabold uppercase tracking-[0.14em] text-[var(--muted)]">Try asking</p><div className="mt-3 grid gap-2 sm:grid-cols-2">{starterQuestions.map((question) => <button key={question} type="button" onClick={() => void ask(question)} className="flex min-h-14 items-center justify-between gap-3 rounded-[18px] border border-black/7 bg-white/65 px-4 py-3 text-left text-xs font-extrabold transition hover:-translate-y-0.5 hover:border-[var(--forest)]/20"><span>{question}</span><ArrowRight className="size-4 shrink-0 text-[var(--forest)]"/></button>)}</div></section> : null}
         {isSending ? <div className="flex items-center gap-3"><div className="grid size-8 place-items-center rounded-xl bg-[var(--forest)] text-[var(--lime)]"><Bot className="size-4"/></div><div className="flex items-center gap-2 rounded-[18px] bg-white px-4 py-3 text-xs font-bold text-[var(--muted)] surface-shadow"><LoaderCircle className="size-4 animate-spin text-[var(--forest)]"/> Reviewing your Houser records…</div></div> : null}
-        {error ? <div role="alert" className="ml-11 rounded-[18px] bg-[#f8ddd7] px-4 py-3 text-xs font-bold text-[#8c3328]">{error}</div> : null}
+        {error ? <div role="alert" className="ml-11 rounded-[18px] bg-[#f8ddd7] px-4 py-3 text-xs font-bold text-[#8c3328]"><span>{error.message}</span>{error.actionUrl ? <a href={error.actionUrl} target="_blank" rel="noreferrer" className="ml-2 inline-flex min-h-8 items-center rounded-lg border border-[#8c3328]/20 bg-white/45 px-2.5 underline underline-offset-2">Open API billing</a> : null}</div> : null}
         <div ref={endRef}/>
       </section>
 

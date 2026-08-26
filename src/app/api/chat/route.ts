@@ -54,6 +54,13 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     console.error("Ask Houser failed", error);
+    if (error instanceof OpenAI.APIError && error.status === 429 && (error.code === "credit_balance_exhausted" || error.type === "insufficient_quota")) {
+      return NextResponse.json({
+        error: "Ask Houser needs OpenAI API credits before it can answer.",
+        code: "openai_credits_exhausted",
+        actionUrl: "https://platform.openai.com/settings/organization/billing/overview",
+      }, { status: 503 });
+    }
     return NextResponse.json({ error: "Houser could not answer that right now. Please try again." }, { status: 500 });
   }
 }
