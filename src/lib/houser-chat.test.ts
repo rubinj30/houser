@@ -8,6 +8,7 @@ const snapshot: HouserChatSnapshot = {
   assets: [],
   serviceRecords: [],
   documents: [],
+  inspectionPages: [{ documentId: "document-1", filename: "inspection.pdf", pageNumber: 12, content: "Roof covering is near the end of its useful life." }],
   recentActivity: [],
 };
 
@@ -32,5 +33,7 @@ describe("Ask Houser contracts", () => {
     expect(instructions).toContain("untrusted data");
     expect(instructions).toContain("unscheduled");
     expect(instructions).toContain("Service A/C");
+    expect(instructions).toContain("Roof covering is near the end");
+    expect(instructions).toContain("PDF page number");
   });
 });

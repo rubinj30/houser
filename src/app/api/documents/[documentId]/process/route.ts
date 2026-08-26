@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { INSPECTION_EXTRACTION_PROMPT, INSPECTION_MODEL, inspectionExtractionSchema } from "@/lib/inspection-extraction";
 import { buildDocumentExtractionPrompt, DOCUMENT_EXTRACTION_MODEL, normalizedDocumentSchema } from "@/lib/document-extraction";
+import { extractDocumentTextPages } from "@/lib/pdf-text";
 
 export const maxDuration = 300;
 
@@ -40,6 +41,24 @@ export async function POST(_request: Request, { params }: Context) {
   try {
     const { data: signed, error: signedError } = await supabase.storage.from("documents").createSignedUrl(document.storage_key, 1800);
     if (signedError || !signed?.signedUrl) throw new Error("The uploaded PDF could not be opened securely.");
+
+    if (isInspection) {
+      const pdfResponse = await fetch(signed.signedUrl);
+      if (!pdfResponse.ok) throw new Error("The uploaded inspection PDF could not be read for text indexing.");
+      const pages = await extractDocumentTextPages(await pdfResponse.arrayBuffer());
+      const { error: pagesError } = await supabase.from("document_text_pages").upsert(
+        pages.map((page) => ({
+          document_id: document.id,
+          page_number: page.pageNumber,
+          content: page.content,
+          content_sha256: page.contentSha256,
+        })),
+        { onConflict: "document_id,page_number" },
+      );
+      if (pagesError) throw new Error(`The inspection text could not be indexed: ${pagesError.message}`);
+      await supabase.from("document_text_pages").delete().eq("document_id", document.id).gt("page_number", pages.length);
+      await supabase.from("documents").update({ page_count: pages.length }).eq("id", document.id);
+    }
 
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     const format = isInspection

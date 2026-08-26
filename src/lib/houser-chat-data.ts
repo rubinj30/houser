@@ -2,6 +2,7 @@ import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
 import type { HouserChatSnapshot } from "@/lib/houser-chat";
+import { extractDocumentTextPages } from "@/lib/pdf-text";
 
 function relatedName(value: unknown) {
   if (Array.isArray(value)) return typeof value[0]?.name === "string" ? value[0].name : null;
@@ -9,7 +10,20 @@ function relatedName(value: unknown) {
   return null;
 }
 
-export async function getHouserChatData() {
+const broadInspectionQuestion = /\b(all|anything|everything|entire|full|global|inspection|overall|report|summary|summarize|whole)\b/i;
+
+function fitInspectionPages<T extends { content: string }>(pages: T[], characterLimit: number) {
+  const selected: T[] = [];
+  let characters = 0;
+  for (const page of pages) {
+    if (selected.length > 0 && characters + page.content.length > characterLimit) break;
+    selected.push(page);
+    characters += page.content.length;
+  }
+  return selected;
+}
+
+export async function getHouserChatData(question = "") {
   const supabase = await createClient();
   const { data: claimsResult, error: claimsError } = await supabase.auth.getClaims();
   const userId = typeof claimsResult?.claims?.sub === "string" ? claimsResult.claims.sub : null;
@@ -55,7 +69,7 @@ export async function getHouserChatData() {
       .limit(200),
     supabase
       .from("documents")
-      .select("id,property_id,document_type,original_filename,document_date,status")
+      .select("id,property_id,document_type,original_filename,document_date,status,storage_bucket,storage_key")
       .in("property_id", propertyIds)
       .neq("status", "failed")
       .order("created_at", { ascending: false })
@@ -70,6 +84,60 @@ export async function getHouserChatData() {
 
   const failed = [workResult, assetResult, serviceResult, documentResult, activityResult].find((result) => result.error);
   if (failed?.error) throw new Error(`Could not prepare Houser chat data: ${failed.error.message}`);
+
+  const documents = documentResult.data ?? [];
+  const inspectionDocumentIds = documents
+    .filter((document) => document.document_type === "inspection")
+    .map((document) => document.id);
+  const documentIndex = new Map(documents.map((document) => [document.id, document]));
+  let inspectionPageRows: Array<{ document_id: string; page_number: number; content: string }> = [];
+  if (inspectionDocumentIds.length) {
+    const { data: indexedDocuments, error: indexedDocumentsError } = await supabase
+      .from("document_text_pages")
+      .select("document_id")
+      .in("document_id", inspectionDocumentIds)
+      .limit(1000);
+    if (indexedDocumentsError) throw new Error(`Could not check inspection text for Houser chat: ${indexedDocumentsError.message}`);
+    const indexedIds = new Set((indexedDocuments ?? []).map((page) => page.document_id));
+    const missingDocuments = documents.filter((document) => document.document_type === "inspection" && !indexedIds.has(document.id));
+
+    await Promise.all(missingDocuments.map(async (document) => {
+      try {
+        const bucket = document.storage_bucket ?? "documents";
+        const { data: signed, error: signedError } = await supabase.storage.from(bucket).createSignedUrl(document.storage_key, 300);
+        if (signedError || !signed?.signedUrl) throw new Error("Private inspection PDF could not be opened.");
+        const response = await fetch(signed.signedUrl);
+        if (!response.ok) throw new Error("Private inspection PDF could not be downloaded.");
+        const pages = await extractDocumentTextPages(await response.arrayBuffer());
+        const { error: upsertError } = await supabase.from("document_text_pages").upsert(
+          pages.map((page) => ({
+            document_id: document.id,
+            page_number: page.pageNumber,
+            content: page.content,
+            content_sha256: page.contentSha256,
+          })),
+          { onConflict: "document_id,page_number" },
+        );
+        if (upsertError) throw upsertError;
+        await supabase.from("documents").update({ page_count: pages.length }).eq("id", document.id);
+      } catch (error) {
+        console.error("Could not backfill inspection text for Ask Houser", { documentId: document.id, error });
+      }
+    }));
+
+    let pageQuery = supabase
+      .from("document_text_pages")
+      .select("document_id,page_number,content")
+      .in("document_id", inspectionDocumentIds);
+    if (broadInspectionQuestion.test(question)) {
+      pageQuery = pageQuery.order("document_id").order("page_number").limit(200);
+    } else {
+      pageQuery = pageQuery.textSearch("search_vector", question, { config: "english", type: "websearch" }).limit(16);
+    }
+    const { data: pages, error: pagesError } = await pageQuery;
+    if (pagesError) throw new Error(`Could not retrieve inspection text for Houser chat: ${pagesError.message}`);
+    inspectionPageRows = pages ?? [];
+  }
 
   const workItems = (workResult.data ?? []).map((item) => ({
     id: item.id,
@@ -134,7 +202,7 @@ export async function getHouserChatData() {
       recurrenceMonths: service.recurrence_months,
       nextServiceOn: service.next_service_on,
     })),
-    documents: (documentResult.data ?? []).map((document) => ({
+    documents: documents.map((document) => ({
       id: document.id,
       property: propertyNames.get(document.property_id) ?? "Unknown property",
       type: document.document_type,
@@ -142,6 +210,16 @@ export async function getHouserChatData() {
       date: document.document_date,
       status: document.status,
     })),
+    inspectionPages: fitInspectionPages(inspectionPageRows.map((page) => {
+      const document = documentIndex.get(page.document_id);
+      return {
+        documentId: page.document_id,
+        property: document ? propertyNames.get(document.property_id) ?? "Unknown property" : "Unknown property",
+        filename: document?.original_filename ?? "Inspection report",
+        pageNumber: page.page_number,
+        content: page.content,
+      };
+    }), broadInspectionQuestion.test(question) ? 120_000 : 36_000),
     recentActivity: (activityResult.data ?? []).map((activity) => ({
       id: activity.id,
       property: propertyNames.get(activity.property_id) ?? "Unknown property",

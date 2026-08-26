@@ -11,7 +11,7 @@ export async function POST(request: Request) {
   const parsed = houserChatRequestSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "Enter a question for Houser." }, { status: 400 });
 
-  const chatData = await getHouserChatData();
+  const chatData = await getHouserChatData(parsed.data.messages.at(-1)?.content ?? "");
   if (!chatData) return NextResponse.json({ error: "Sign in to ask about your home." }, { status: 401 });
   if (!process.env.OPENAI_API_KEY) return NextResponse.json({ error: "Ask Houser is not configured yet." }, { status: 503 });
 
