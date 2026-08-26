@@ -105,6 +105,7 @@ const navItems: { id: View; label: string; icon: LucideIcon }[] = [
 
 export function HouserApp({ seed, propertyId, selectedPropertyId, properties, userEmail, hasInspectionDocument, initialWorkReportId, initialReviewStatuses, initialReviewActivities, initialServiceRecords }: { seed: InspectionSeed; propertyId: string | null; selectedPropertyId: string | "all"; properties: PropertySummary[]; userEmail: string; hasInspectionDocument: boolean; initialWorkReportId: string | null; initialReviewStatuses: Record<string, ReviewStatus>; initialReviewActivities: ReviewActivity[]; initialServiceRecords: ServiceRecord[] }) {
   const router = useRouter();
+  const contentScrollRef = useRef<HTMLDivElement>(null);
   const initialWorkItem = seed.findings.find((item) => item.reportId === initialWorkReportId || item.workItemId === initialWorkReportId);
   const [activeView, setActiveView] = useState<View>(initialWorkItem ? "work" : "home");
   const [isAdding, setIsAdding] = useState(false);
@@ -153,6 +154,7 @@ export function HouserApp({ seed, propertyId, selectedPropertyId, properties, us
       setWorkIntent((current) => ({ category: "all", severity: "all", selectedReportId: null, revision: current.revision + 1 }));
     }
     setActiveView(view);
+    contentScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -164,13 +166,14 @@ export function HouserApp({ seed, propertyId, selectedPropertyId, properties, us
       revision: current.revision + 1,
     }));
     setActiveView("work");
+    contentScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   return (
-    <div className="min-h-dvh lg:grid lg:grid-cols-[248px_1fr]">
+    <div className="grid h-dvh grid-rows-[minmax(0,1fr)_auto] overflow-hidden lg:h-auto lg:min-h-dvh lg:grid-cols-[248px_1fr] lg:grid-rows-none lg:overflow-visible">
       <DesktopSidebar activeView={activeView} workCount={currentFindings.length} userEmail={userEmail} onChangeView={changeView} />
-      <div className="min-w-0 pb-24 lg:pb-0">
+      <div ref={contentScrollRef} className="min-w-0 overflow-y-auto overscroll-y-contain lg:overflow-visible">
         <TopBar selectedPropertyId={selectedPropertyId} properties={properties} userEmail={userEmail} setProperty={selectProperty} canAdd={Boolean(propertyId)} onAdd={() => setIsAdding(true)} onUpload={() => { setUploadTarget(null); setIsUploadingInspection(true); }} />
         <main className="mx-auto w-full max-w-[1500px] px-4 pb-10 pt-5 sm:px-6 lg:px-10 lg:pb-14 lg:pt-8">
           {activeView === "home" ? (
@@ -798,7 +801,7 @@ function PageHeading({ eyebrow, title, description }: { eyebrow: string; title: 
 }
 
 function MobileNav({ activeView, onChangeView, canAdd, onAdd }: { activeView: View; onChangeView: (view: View) => void; canAdd: boolean; onAdd: () => void }) {
-  return <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-black/8 bg-[rgba(252,251,248,0.94)] px-2 pb-[max(8px,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl lg:hidden" aria-label="Mobile navigation">{navItems.slice(0, 2).map((item) => <MobileNavButton key={item.id} item={item} active={activeView === item.id} onClick={() => onChangeView(item.id)} />)}<button type="button" onClick={onAdd} disabled={!canAdd} className="mx-auto -mt-7 grid size-14 place-items-center rounded-[20px] bg-[var(--forest)] text-white shadow-xl shadow-[#214f3e]/25 disabled:cursor-not-allowed disabled:bg-[var(--muted)] disabled:opacity-55" aria-label={canAdd ? "Add work" : "Choose a property to add work"}><Plus className="size-6"/></button>{navItems.slice(2).map((item) => <MobileNavButton key={item.id} item={item} active={activeView === item.id} onClick={() => onChangeView(item.id)} />)}</nav>;
+  return <nav className="relative z-40 grid min-h-[72px] grid-cols-5 border-t border-black/8 bg-[var(--paper)] px-2 pb-[max(8px,env(safe-area-inset-bottom))] pt-2 lg:hidden" aria-label="Mobile navigation">{navItems.slice(0, 2).map((item) => <MobileNavButton key={item.id} item={item} active={activeView === item.id} onClick={() => onChangeView(item.id)} />)}<button type="button" onClick={onAdd} disabled={!canAdd} className="mx-auto -mt-7 grid size-14 place-items-center rounded-[20px] bg-[var(--forest)] text-white shadow-xl shadow-[#214f3e]/25 disabled:cursor-not-allowed disabled:bg-[var(--muted)] disabled:opacity-55" aria-label={canAdd ? "Add work" : "Choose a property to add work"}><Plus className="size-6"/></button>{navItems.slice(2).map((item) => <MobileNavButton key={item.id} item={item} active={activeView === item.id} onClick={() => onChangeView(item.id)} />)}</nav>;
 }
 
 function MobileNavButton({ item, active, onClick }: { item: (typeof navItems)[number]; active: boolean; onClick: () => void }) {
