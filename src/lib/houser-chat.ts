@@ -11,8 +11,20 @@ const workStatusSchema = z.enum(["inbox", "planned", "scheduled", "in_progress",
 const workPrioritySchema = z.enum(["emergency", "urgent", "important", "routine", "informational"]);
 const workTypeSchema = z.enum(["inspect", "maintain", "repair", "replace", "improve", "monitor", "other"]);
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const propertyTypeSchema = z.enum(["primary_residence", "rental", "vacation_home", "other"]);
 
 export const houserChatActionSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("create_property"),
+    summary: z.string().min(1).max(500),
+    displayName: z.string().min(1).max(120),
+    propertyType: propertyTypeSchema,
+    addressLine1: z.string().max(200).nullable(),
+    city: z.string().max(120).nullable(),
+    region: z.string().max(120).nullable(),
+    postalCode: z.string().max(24).nullable(),
+    timezone: z.string().min(1).max(80).nullable(),
+  }),
   z.object({
     type: z.literal("create_work_item"),
     summary: z.string().min(1).max(500),
@@ -105,7 +117,8 @@ Rules:
 - relatedWorkItemIds may contain only IDs present in snapshot.workItems and should include the records most useful to the answer.
 - confidence reflects the completeness of Houser's records for this specific answer, not your general knowledge.
 - You may read and answer freely. Never claim a create or update already happened.
-- When, and only when, the user explicitly asks to create or change a work item, return one proposedAction that captures the requested change. The app will require the owner to confirm it before writing.
+- When, and only when, the user explicitly asks to create a property or create/change a work item, return one proposedAction that captures the requested change. The app will require confirmation before writing.
+- For property creation, require a useful display name and property type. Use null for address fields the user did not provide. Use the supplied timezone when known; otherwise use null. Never claim the property already exists.
 - For updates, copy workItemId and expectedUpdatedAt exactly from snapshot.workItems. Use null for every field the user did not ask to change. Put explanatory history in note when useful.
 - For creates, choose only a propertyId present in snapshot.properties. If the property is ambiguous, ask a follow-up instead of proposing an action.
 - If a requested update is ambiguous about which work item, do not propose an action; ask the user to identify it.

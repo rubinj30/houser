@@ -2,6 +2,7 @@ import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 import { houserChatActionSchema, type HouserChatAction } from "@/lib/houser-chat";
 import { createClient } from "@/lib/supabase/server";
+import { createHouseholdProperty } from "@/lib/property-mutations";
 
 const categoryAliases: Record<string, string> = {
   HVAC: "HVAC and Ventilation",
@@ -170,6 +171,13 @@ export async function POST(request: Request) {
   if (authError || !userId) return NextResponse.json({ error: "Sign in to update Houser." }, { status: 401 });
 
   try {
+    if (parsed.data.type === "create_property") {
+      const property = await createHouseholdProperty(supabase, userId, parsed.data);
+      revalidatePath("/");
+      revalidatePath("/household");
+      revalidatePath("/chat");
+      return NextResponse.json({ message: "Property created.", property });
+    }
     const workItem = parsed.data.type === "create_work_item"
       ? await createWorkItem(supabase, userId, parsed.data)
       : await updateWorkItem(supabase, userId, parsed.data);

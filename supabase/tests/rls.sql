@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(62);
+select plan(64);
 
 insert into auth.users (
   instance_id, id, aud, role, email, encrypted_password,
@@ -42,6 +42,18 @@ select results_eq(
   $$ select display_name from public.properties order by display_name $$,
   array['Property A'::text],
   'a member only sees properties in their account'
+);
+
+select lives_ok(
+  $$ insert into public.properties (account_id, display_name, property_type) values ('a0000000-0000-0000-0000-000000000001', 'Property A Rental', 'rental') $$,
+  'an owner can add a property to their account'
+);
+
+select throws_ok(
+  $$ insert into public.properties (account_id, display_name, property_type) values ('b0000000-0000-0000-0000-000000000002', 'Forged Property', 'rental') $$,
+  '42501',
+  null,
+  'an owner cannot add a property to another account'
 );
 
 select lives_ok(
@@ -358,7 +370,7 @@ select results_eq(
 
 select results_eq(
   $$ select display_name from public.properties order by display_name $$,
-  array['Property A'::text],
+  array['Property A'::text, 'Property A Rental'::text],
   'a household member can read every property in the account'
 );
 

@@ -50,6 +50,7 @@ export async function POST(request: Request) {
     const proposedAction = (() => {
       const action = answer.proposedAction;
       if (!action) return null;
+      if (action.type === "create_property") return action;
       if (action.type === "create_work_item") {
         const propertyExists = chatData.snapshot.properties.some((property) => property.id === action.propertyId);
         return propertyExists ? action : null;

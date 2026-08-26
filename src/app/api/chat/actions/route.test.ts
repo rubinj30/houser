@@ -16,6 +16,18 @@ const propertyId = "22222222-2222-4222-8222-222222222222";
 const workItemId = "11111111-1111-4111-8111-111111111111";
 const updatedAt = "2026-08-25T12:00:00.000Z";
 
+const createPropertyAction = {
+  type: "create_property",
+  summary: "Add the Oak Street rental.",
+  displayName: "Oak Street Rental",
+  propertyType: "rental",
+  addressLine1: "123 Oak Street",
+  city: "Atlanta",
+  region: "GA",
+  postalCode: "30303",
+  timezone: "America/New_York",
+};
+
 const createAction = {
   type: "create_work_item",
   summary: "Create a gutter cleaning item.",
@@ -120,6 +132,49 @@ describe("POST /api/chat/actions", () => {
     }));
     expect(mocks.revalidatePath).toHaveBeenCalledWith("/");
     expect(mocks.revalidatePath).toHaveBeenCalledWith("/chat");
+  });
+
+  it("creates a household property after owner confirmation", async () => {
+    const membership = queryResult({ account_id: "33333333-3333-4333-8333-333333333333" });
+    const property = queryResult({
+      id: propertyId,
+      display_name: createPropertyAction.displayName,
+      property_type: "rental",
+      address_line1: createPropertyAction.addressLine1,
+      city: "Atlanta",
+      region: "GA",
+      postal_code: "30303",
+      timezone: "America/New_York",
+    });
+    const client = queuedSupabaseClient({ claims: { sub: userId }, tables: {
+      account_memberships: [membership],
+      properties: [property],
+    } });
+    mocks.createClient.mockResolvedValue(client as never);
+
+    const response = await POST(request(createPropertyAction));
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      message: "Property created.",
+      property: { id: propertyId, displayName: "Oak Street Rental", propertyType: "rental" },
+    });
+    expect(membership.eq).toHaveBeenCalledWith("role", "owner");
+    expect(property.insert).toHaveBeenCalledWith(expect.objectContaining({
+      account_id: "33333333-3333-4333-8333-333333333333",
+      display_name: "Oak Street Rental",
+      property_type: "rental",
+    }));
+    expect(mocks.revalidatePath).toHaveBeenCalledWith("/household");
+  });
+
+  it("does not let a non-owner create a household property", async () => {
+    const membership = queryResult(null);
+    const client = queuedSupabaseClient({ claims: { sub: userId }, tables: { account_memberships: [membership] } });
+    mocks.createClient.mockResolvedValue(client as never);
+
+    const response = await POST(request(createPropertyAction));
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ error: /Only a household owner/ });
   });
 
   it("rejects a stale proposal without writing", async () => {

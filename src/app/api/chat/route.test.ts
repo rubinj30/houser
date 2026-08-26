@@ -98,6 +98,23 @@ describe("POST /api/chat", () => {
     await expect(response.json()).resolves.toMatchObject({ proposedAction });
   });
 
+  it("returns a property proposal for confirmation", async () => {
+    const proposedAction = {
+      type: "create_property",
+      summary: "Add the Oak Street rental.",
+      displayName: "Oak Street Rental",
+      propertyType: "rental",
+      addressLine1: "123 Oak Street",
+      city: "Atlanta",
+      region: "GA",
+      postalCode: "30303",
+      timezone: "America/New_York",
+    };
+    mocks.parse.mockResolvedValue({ output_parsed: { answer: "I can add that property after you confirm.", confidence: "high", suggestedQuestions: [], relatedWorkItemIds: [], proposedAction } });
+    const response = await POST(request("Add my rental at 123 Oak Street in Atlanta"));
+    await expect(response.json()).resolves.toMatchObject({ proposedAction });
+  });
+
   it("drops an action whose concurrency token is no longer current", async () => {
     mocks.parse.mockResolvedValue({ output_parsed: {
       answer: "I can update it.",

@@ -1,9 +1,10 @@
 "use client";
 
-import { ArrowLeft, Check, ChevronDown, Home, LoaderCircle, Mail, ShieldCheck, Trash2, UserPlus, Users } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, ChevronDown, Home, LoaderCircle, Mail, Plus, ShieldCheck, Trash2, UserPlus, Users, X } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import {
+  createHouseholdPropertyAction,
   inviteHouseholdMemberAction,
   removeHouseholdMemberAction,
   revokeHouseholdInvitationAction,
@@ -36,6 +37,13 @@ export function HouseholdSettingsView({ household }: { household: HouseholdSetti
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [isAddingProperty, setIsAddingProperty] = useState(false);
+  const [propertyName, setPropertyName] = useState("");
+  const [propertyType, setPropertyType] = useState<"primary_residence" | "rental" | "vacation_home" | "other">("rental");
+  const [addressLine1, setAddressLine1] = useState("");
+  const [city, setCity] = useState("");
+  const [region, setRegion] = useState("");
+  const [postalCode, setPostalCode] = useState("");
 
   const run = async (key: string, action: () => Promise<unknown>, message?: string) => {
     setBusyKey(key);
@@ -59,6 +67,30 @@ export function HouseholdSettingsView({ household }: { household: HouseholdSetti
       await inviteHouseholdMemberAction({ accountId: household.account.id, email: targetEmail, role });
       setEmail("");
     }, `Invitation sent to ${targetEmail}.`);
+  };
+
+  const addProperty = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const displayName = propertyName.trim();
+    if (!displayName) return;
+    await run("property", async () => {
+      await createHouseholdPropertyAction({
+        displayName,
+        propertyType,
+        addressLine1: addressLine1.trim() || null,
+        city: city.trim() || null,
+        region: region.trim() || null,
+        postalCode: postalCode.trim() || null,
+        timezone: "America/New_York",
+      });
+      setPropertyName("");
+      setPropertyType("rental");
+      setAddressLine1("");
+      setCity("");
+      setRegion("");
+      setPostalCode("");
+      setIsAddingProperty(false);
+    }, `${displayName} was added to your household.`);
   };
 
   return <main className="min-h-dvh bg-[var(--canvas)]">
@@ -92,7 +124,20 @@ export function HouseholdSettingsView({ household }: { household: HouseholdSetti
 
       <aside className="space-y-5">
         <PasskeySettings />
-        <section className="rounded-[26px] border border-black/7 bg-[var(--paper)] p-5 surface-shadow sm:p-6"><div className="flex items-center gap-3"><Home className="size-5 text-[var(--forest)]"/><h2 className="font-display text-lg font-extrabold">Shared properties</h2></div><div className="mt-4 space-y-2">{household.properties.map((property) => <div key={property.id} className="rounded-2xl bg-[var(--mint)]/45 p-4"><p className="text-sm font-extrabold">{property.displayName}</p><p className="mt-1 text-[10px] font-bold capitalize text-[var(--muted)]">{property.propertyType.replaceAll("_", " ")}</p></div>)}</div><p className="mt-4 text-xs leading-5 text-[var(--muted)]">Every active household member can access these properties. Property-specific access can be added later for managers or vendors.</p></section>
+        <section className="rounded-[26px] border border-black/7 bg-[var(--paper)] p-5 surface-shadow sm:p-6">
+          <div className="flex items-center justify-between gap-3"><div className="flex items-center gap-3"><Home className="size-5 text-[var(--forest)]"/><h2 className="font-display text-lg font-extrabold">Shared properties</h2></div>{isOwner ? <button type="button" aria-expanded={isAddingProperty} aria-controls="add-property-form" onClick={() => setIsAddingProperty((current) => !current)} className="flex min-h-10 shrink-0 items-center gap-1.5 rounded-xl border border-[var(--forest)]/15 bg-[var(--mint)]/45 px-3 text-xs font-extrabold text-[var(--forest)]">{isAddingProperty ? <X className="size-4"/> : <Plus className="size-4"/>}{isAddingProperty ? "Cancel" : "Add property"}</button> : null}</div>
+          <div className="mt-4 space-y-2">{household.properties.map((property) => <Link key={property.id} href={`/?property=${encodeURIComponent(property.id)}`} className="group flex items-center justify-between gap-3 rounded-2xl bg-[var(--mint)]/45 p-4 transition hover:bg-[var(--mint)]/70"><div><p className="text-sm font-extrabold">{property.displayName}</p><p className="mt-1 text-[10px] font-bold capitalize text-[var(--muted)]">{property.propertyType.replaceAll("_", " ")}</p></div><ArrowRight className="size-4 text-[var(--forest)] transition group-hover:translate-x-0.5"/></Link>)}</div>
+          {isOwner && isAddingProperty ? <form id="add-property-form" onSubmit={addProperty} className="mt-4 space-y-3 rounded-2xl border border-[var(--forest)]/12 bg-[var(--mint)]/25 p-4">
+            <div><p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--forest)]">New property</p><p className="mt-1 text-xs leading-5 text-[var(--muted)]">Start with the basics. You can upload an inspection and add work after saving.</p></div>
+            <label className="block"><span className="text-xs font-extrabold">Property name</span><input autoFocus required maxLength={120} value={propertyName} onChange={(event) => setPropertyName(event.target.value)} placeholder="e.g. Oak Street Rental" className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 text-sm outline-none focus:border-[var(--forest)]/40"/></label>
+            <label className="block"><span className="text-xs font-extrabold">Property type</span><select value={propertyType} onChange={(event) => setPropertyType(event.target.value as typeof propertyType)} className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 text-sm font-bold"><option value="primary_residence">Primary residence</option><option value="rental">Rental</option><option value="vacation_home">Vacation home</option><option value="other">Other</option></select></label>
+            <label className="block"><span className="text-xs font-extrabold">Street address <span className="font-normal text-[var(--muted)]">(optional)</span></span><input autoComplete="street-address" maxLength={200} value={addressLine1} onChange={(event) => setAddressLine1(event.target.value)} placeholder="123 Main Street" className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 text-sm outline-none focus:border-[var(--forest)]/40"/></label>
+            <div className="grid grid-cols-2 gap-2"><label><span className="text-xs font-extrabold">City</span><input autoComplete="address-level2" maxLength={120} value={city} onChange={(event) => setCity(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 text-sm outline-none focus:border-[var(--forest)]/40"/></label><label><span className="text-xs font-extrabold">State</span><input autoComplete="address-level1" maxLength={120} value={region} onChange={(event) => setRegion(event.target.value)} placeholder="GA" className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 text-sm outline-none focus:border-[var(--forest)]/40"/></label></div>
+            <label className="block"><span className="text-xs font-extrabold">ZIP code</span><input inputMode="numeric" autoComplete="postal-code" maxLength={24} value={postalCode} onChange={(event) => setPostalCode(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 text-sm outline-none focus:border-[var(--forest)]/40"/></label>
+            <button type="submit" disabled={!propertyName.trim() || busyKey === "property"} className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-[var(--forest)] px-4 text-xs font-extrabold text-white disabled:opacity-45">{busyKey === "property" ? <LoaderCircle className="size-4 animate-spin"/> : <Plus className="size-4"/>}{busyKey === "property" ? "Adding property…" : "Add property"}</button>
+          </form> : null}
+          <p className="mt-4 text-xs leading-5 text-[var(--muted)]">Every active household member can access these properties. Property-specific access can be added later for managers or vendors.</p>
+        </section>
         {isOwner && household.invitations.length ? <section className="rounded-[26px] border border-black/7 bg-[var(--paper)] p-5 surface-shadow sm:p-6"><h2 className="font-display text-lg font-extrabold">Pending invitations</h2><div className="mt-4 divide-y divide-black/6">{household.invitations.map((invitation) => <div key={invitation.id} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0"><div className="min-w-0 flex-1"><p className="truncate text-xs font-extrabold">{invitation.email}</p><p className="mt-1 text-[10px] text-[var(--muted)]">{roleLabels[invitation.role]} · expires {new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(new Date(invitation.expiresAt))}</p></div><button type="button" disabled={busyKey === invitation.id} onClick={() => void run(invitation.id, () => revokeHouseholdInvitationAction({ invitationId: invitation.id }), "Invitation revoked.")} className="min-h-10 rounded-xl px-3 text-xs font-extrabold text-[var(--muted)] hover:bg-black/5 disabled:opacity-50">Revoke</button></div>)}</div></section> : null}
         <section className="rounded-[26px] bg-[var(--forest-dark)] p-5 text-white sm:p-6"><ShieldCheck className="size-5 text-[var(--lime)]"/><h2 className="font-display mt-4 text-lg font-extrabold">Private by household</h2><p className="mt-2 text-xs leading-5 text-white/55">Each person signs in separately. Access changes take effect immediately, while their prior notes and work history remain attributed to them.</p></section>
       </aside>
