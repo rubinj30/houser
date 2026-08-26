@@ -1,14 +1,38 @@
 "use client";
 
-import { CheckCircle2, Home, LoaderCircle, Mail, ShieldCheck } from "lucide-react";
-import { useState } from "react";
+import { CheckCircle2, Fingerprint, Home, LoaderCircle, Mail, ShieldCheck } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useState, useSyncExternalStore } from "react";
 import { requestMagicLinkAction } from "@/app/actions";
+import { browserSupportsPasskeys, passkeyErrorMessage, subscribeToPasskeySupport } from "@/lib/passkeys";
+import { createClient } from "@/lib/supabase/client";
 
 export function AuthScreen({ authError = false, invitationError = false }: { authError?: boolean; invitationError?: boolean }) {
+  const router = useRouter();
   const [email, setEmail] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const [isSigningWithPasskey, setIsSigningWithPasskey] = useState(false);
+  const supportsPasskeys = useSyncExternalStore(subscribeToPasskeySupport, browserSupportsPasskeys, () => false);
   const [sentTo, setSentTo] = useState<string | null>(null);
   const [error, setError] = useState(invitationError ? "You signed in, but the household invitation could not be accepted. Ask the household owner to resend it." : authError ? "That sign-in link could not be verified. Request a fresh one below." : "");
+
+  const signInWithPasskey = async () => {
+    setIsSigningWithPasskey(true);
+    setError("");
+    try {
+      const { data, error: passkeyError } = await createClient().auth.signInWithPasskey();
+      if (passkeyError || !data?.session) {
+        setError(passkeyErrorMessage(passkeyError, "sign-in"));
+        return;
+      }
+      router.replace("/");
+      router.refresh();
+    } catch (passkeyError) {
+      setError(passkeyErrorMessage(passkeyError, "sign-in"));
+    } finally {
+      setIsSigningWithPasskey(false);
+    }
+  };
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -60,10 +84,11 @@ export function AuthScreen({ authError = false, invitationError = false }: { aut
             <form onSubmit={submit} autoComplete="on" className="rounded-[28px] border border-black/7 bg-[var(--paper)] p-6 surface-shadow sm:p-8">
               <p className="text-xs font-extrabold uppercase tracking-[0.14em] text-[var(--forest)]">Private workspace</p>
               <h1 className="font-display mt-3 text-3xl font-extrabold tracking-[-0.045em]">Sign in to Houser</h1>
-              <p className="mt-3 text-sm leading-6 text-[var(--muted)]">Enter your email and we’ll send a password-free sign-in link.</p>
+              <p className="mt-3 text-sm leading-6 text-[var(--muted)]">Use Face ID or a passkey after setting it up, or request a password-free email link.</p>
+              {supportsPasskeys ? <><button type="button" disabled={isSigningWithPasskey || isSending} onClick={() => void signInWithPasskey()} className="mt-6 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[var(--forest)] px-5 text-sm font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-50">{isSigningWithPasskey ? <LoaderCircle className="size-4 animate-spin"/> : <Fingerprint className="size-[18px]"/>}{isSigningWithPasskey ? "Waiting for your device…" : "Sign in with Face ID or passkey"}</button><div className="my-5 flex items-center gap-3 text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--muted)]"><span className="h-px flex-1 bg-black/8"/>or use email<span className="h-px flex-1 bg-black/8"/></div></> : null}
               <label htmlFor="sign-in-email" className="mt-7 block"><span className="text-xs font-extrabold">Email address</span><input id="sign-in-email" name="email" type="email" inputMode="email" autoComplete="email" autoCapitalize="none" spellCheck={false} required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" className="mt-2 h-12 w-full rounded-xl border border-black/10 bg-white px-4 text-sm outline-none focus:border-[var(--forest)]/40" /></label>
               {error ? <p role="alert" className="mt-3 rounded-xl bg-[#f8ddd7] px-3 py-2 text-xs font-bold text-[#8c3328]">{error}</p> : null}
-              <button type="submit" disabled={isSending || !email.trim()} className="mt-5 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[var(--forest)] px-5 text-sm font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-50">{isSending ? <LoaderCircle className="size-4 animate-spin" /> : <Mail className="size-4" />}{isSending ? "Sending link…" : "Email me a sign-in link"}</button>
+              <button type="submit" disabled={isSending || isSigningWithPasskey || !email.trim()} className={`mt-5 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl px-5 text-sm font-extrabold disabled:cursor-not-allowed disabled:opacity-50 ${supportsPasskeys ? "border border-[var(--forest)]/18 bg-white text-[var(--forest)]" : "bg-[var(--forest)] text-white"}`}>{isSending ? <LoaderCircle className="size-4 animate-spin" /> : <Mail className="size-4" />}{isSending ? "Sending link…" : "Email me a sign-in link"}</button>
               <p className="mt-4 text-center text-[11px] leading-5 text-[var(--muted)]">No password required. Sign-in links are sent to active household members and invited emails.</p>
             </form>
           )}

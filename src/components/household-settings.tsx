@@ -10,6 +10,7 @@ import {
   updateHouseholdMemberRoleAction,
 } from "@/app/household/actions";
 import type { HouseholdRole, HouseholdSettings } from "@/lib/household-data";
+import { PasskeySettings } from "@/components/passkey-settings";
 
 const roleLabels: Record<HouseholdRole | "manager", string> = {
   owner: "Owner",
@@ -90,6 +91,7 @@ export function HouseholdSettingsView({ household }: { household: HouseholdSetti
       </div>
 
       <aside className="space-y-5">
+        <PasskeySettings />
         <section className="rounded-[26px] border border-black/7 bg-[var(--paper)] p-5 surface-shadow sm:p-6"><div className="flex items-center gap-3"><Home className="size-5 text-[var(--forest)]"/><h2 className="font-display text-lg font-extrabold">Shared properties</h2></div><div className="mt-4 space-y-2">{household.properties.map((property) => <div key={property.id} className="rounded-2xl bg-[var(--mint)]/45 p-4"><p className="text-sm font-extrabold">{property.displayName}</p><p className="mt-1 text-[10px] font-bold capitalize text-[var(--muted)]">{property.propertyType.replaceAll("_", " ")}</p></div>)}</div><p className="mt-4 text-xs leading-5 text-[var(--muted)]">Every active household member can access these properties. Property-specific access can be added later for managers or vendors.</p></section>
         {isOwner && household.invitations.length ? <section className="rounded-[26px] border border-black/7 bg-[var(--paper)] p-5 surface-shadow sm:p-6"><h2 className="font-display text-lg font-extrabold">Pending invitations</h2><div className="mt-4 divide-y divide-black/6">{household.invitations.map((invitation) => <div key={invitation.id} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0"><div className="min-w-0 flex-1"><p className="truncate text-xs font-extrabold">{invitation.email}</p><p className="mt-1 text-[10px] text-[var(--muted)]">{roleLabels[invitation.role]} · expires {new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(new Date(invitation.expiresAt))}</p></div><button type="button" disabled={busyKey === invitation.id} onClick={() => void run(invitation.id, () => revokeHouseholdInvitationAction({ invitationId: invitation.id }), "Invitation revoked.")} className="min-h-10 rounded-xl px-3 text-xs font-extrabold text-[var(--muted)] hover:bg-black/5 disabled:opacity-50">Revoke</button></div>)}</div></section> : null}
         <section className="rounded-[26px] bg-[var(--forest-dark)] p-5 text-white sm:p-6"><ShieldCheck className="size-5 text-[var(--lime)]"/><h2 className="font-display mt-4 text-lg font-extrabold">Private by household</h2><p className="mt-2 text-xs leading-5 text-white/55">Each person signs in separately. Access changes take effect immediately, while their prior notes and work history remain attributed to them.</p></section>
