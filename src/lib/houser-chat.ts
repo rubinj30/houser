@@ -27,6 +27,26 @@ export type HouserChatSnapshot = {
   recentActivity: Array<Record<string, unknown>>;
 };
 
+const inspectionSearchStopWords = new Set([
+  "a", "about", "all", "am", "an", "and", "any", "are", "at", "be", "can", "do", "does", "for", "from", "have", "house", "how", "i", "in", "is", "it", "me", "my", "need", "needed", "of", "on", "or", "please", "status", "tell", "the", "there", "to", "was", "what", "when", "where", "which", "with", "you",
+]);
+
+const inspectionSearchExpansions: Record<string, string[]> = {
+  ac: ["ac", "hvac", "cooling", "conditioner"],
+  air: ["air", "hvac", "cooling", "conditioner"],
+  deck: ["deck", "porch", "stain", "wood"],
+  roof: ["roof", "roofing", "shingle", "flashing"],
+};
+
+export function buildInspectionSearchQuery(question: string) {
+  const normalized = question.toLowerCase().replaceAll("a/c", "ac");
+  const terms = [...new Set(normalized.match(/[a-z0-9]+/g) ?? [])]
+    .filter((term) => term.length > 1 && !inspectionSearchStopWords.has(term))
+    .slice(0, 8);
+  const expanded = [...new Set(terms.flatMap((term) => inspectionSearchExpansions[term] ?? [term]))];
+  return expanded.join(" OR ") || "inspection OR maintenance OR repair";
+}
+
 export function buildHouserChatInstructions(snapshot: HouserChatSnapshot) {
   return `You are Ask Houser, a careful home-record assistant. Answer the homeowner's question by reasoning over the authorized Houser snapshot below.
 

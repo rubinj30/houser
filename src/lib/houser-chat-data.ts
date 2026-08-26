@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
-import type { HouserChatSnapshot } from "@/lib/houser-chat";
+import { buildInspectionSearchQuery, type HouserChatSnapshot } from "@/lib/houser-chat";
 import { extractDocumentTextPages } from "@/lib/pdf-text";
 
 function relatedName(value: unknown) {
@@ -132,7 +132,7 @@ export async function getHouserChatData(question = "") {
     if (broadInspectionQuestion.test(question)) {
       pageQuery = pageQuery.order("document_id").order("page_number").limit(200);
     } else {
-      pageQuery = pageQuery.textSearch("search_vector", question, { config: "english", type: "websearch" }).limit(16);
+      pageQuery = pageQuery.textSearch("search_vector", buildInspectionSearchQuery(question), { config: "english", type: "websearch" }).limit(16);
     }
     const { data: pages, error: pagesError } = await pageQuery;
     if (pagesError) throw new Error(`Could not retrieve inspection text for Houser chat: ${pagesError.message}`);

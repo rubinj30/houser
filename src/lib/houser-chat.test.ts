@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildHouserChatInstructions, houserChatRequestSchema, houserChatResponseSchema, type HouserChatSnapshot } from "./houser-chat";
+import { buildHouserChatInstructions, buildInspectionSearchQuery, houserChatRequestSchema, houserChatResponseSchema, type HouserChatSnapshot } from "./houser-chat";
 
 const snapshot: HouserChatSnapshot = {
   generatedAt: "2026-08-25T12:00:00.000Z",
@@ -35,5 +35,10 @@ describe("Ask Houser contracts", () => {
     expect(instructions).toContain("Service A/C");
     expect(instructions).toContain("Roof covering is near the end");
     expect(instructions).toContain("PDF page number");
+  });
+
+  it("turns conversational questions into broad inspection searches", () => {
+    expect(buildInspectionSearchQuery("What's the status of my roof?")).toBe("roof OR roofing OR shingle OR flashing");
+    expect(buildInspectionSearchQuery("Is anything needed for my A/C?")).toContain("hvac");
   });
 });
