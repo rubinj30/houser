@@ -36,6 +36,8 @@ create table public.account_invitations (
 
 create index account_invitations_account_id_idx on public.account_invitations(account_id, created_at desc);
 create index account_invitations_email_idx on public.account_invitations(lower(email), status);
+create index account_invitations_invited_by_idx on public.account_invitations(invited_by);
+create index account_invitations_accepted_by_idx on public.account_invitations(accepted_by) where accepted_by is not null;
 create unique index account_invitations_pending_email_idx
   on public.account_invitations(account_id, lower(email))
   where status = 'pending';
@@ -57,6 +59,7 @@ create table public.account_activity_events (
 
 create index account_activity_events_account_id_idx on public.account_activity_events(account_id, created_at desc);
 create index account_activity_events_subject_user_id_idx on public.account_activity_events(subject_user_id);
+create index account_activity_events_created_by_idx on public.account_activity_events(created_by);
 
 create or replace function private.can_edit_account_content(target_account_id uuid)
 returns boolean
@@ -254,7 +257,7 @@ set search_path = ''
 as $$
 declare
   current_user_id uuid := (select auth.uid());
-  current_role text;
+  member_role text;
   owner_count integer;
   subject_email text;
 begin
@@ -266,17 +269,17 @@ begin
   end if;
 
   select membership.role, profile.email
-    into current_role, subject_email
+    into member_role, subject_email
   from public.account_memberships membership
   left join public.profiles profile on profile.id = membership.user_id
   where membership.account_id = target_account_id
     and membership.user_id = target_user_id
     and membership.status = 'active';
 
-  if current_role is null then
+  if member_role is null then
     raise exception 'Household member not found';
   end if;
-  if current_role = 'owner' and next_role <> 'owner' then
+  if member_role = 'owner' and next_role <> 'owner' then
     select count(*) into owner_count
     from public.account_memberships membership
     where membership.account_id = target_account_id
@@ -295,7 +298,7 @@ begin
     account_id, event_type, subject_user_id, subject_email, metadata, created_by
   ) values (
     target_account_id, 'member_role_changed', target_user_id, subject_email,
-    jsonb_build_object('from', current_role, 'to', next_role), current_user_id
+    jsonb_build_object('from', member_role, 'to', next_role), current_user_id
   );
 end;
 $$;
@@ -311,7 +314,7 @@ set search_path = ''
 as $$
 declare
   current_user_id uuid := (select auth.uid());
-  current_role text;
+  member_role text;
   owner_count integer;
   subject_email text;
 begin
@@ -320,17 +323,17 @@ begin
   end if;
 
   select membership.role, profile.email
-    into current_role, subject_email
+    into member_role, subject_email
   from public.account_memberships membership
   left join public.profiles profile on profile.id = membership.user_id
   where membership.account_id = target_account_id
     and membership.user_id = target_user_id
     and membership.status = 'active';
 
-  if current_role is null then
+  if member_role is null then
     raise exception 'Household member not found';
   end if;
-  if current_role = 'owner' then
+  if member_role = 'owner' then
     select count(*) into owner_count
     from public.account_memberships membership
     where membership.account_id = target_account_id
@@ -349,7 +352,7 @@ begin
     account_id, event_type, subject_user_id, subject_email, metadata, created_by
   ) values (
     target_account_id, 'member_removed', target_user_id, subject_email,
-    jsonb_build_object('role', current_role), current_user_id
+    jsonb_build_object('role', member_role), current_user_id
   );
 end;
 $$;

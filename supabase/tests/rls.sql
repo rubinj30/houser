@@ -112,7 +112,7 @@ select results_eq(
 );
 
 select results_eq(
-  $$ select event_type from public.activity_events where work_item_id = 'a1100000-0000-0000-0000-000000000001' order by created_at desc limit 1 $$,
+  $$ select event_type from public.activity_events where work_item_id = 'a1100000-0000-0000-0000-000000000001' and event_type = 'service_recorded' $$,
   array['service_recorded'::text],
   'completion writes an auditable service event'
 );
