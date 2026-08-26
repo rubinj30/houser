@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildHouserChatInstructions, buildInspectionSearchQuery, houserChatRequestSchema, houserChatResponseSchema, type HouserChatSnapshot } from "./houser-chat";
+import { buildHouserChatInstructions, buildInspectionSearchQuery, houserChatActionSchema, houserChatRequestSchema, houserChatResponseSchema, type HouserChatSnapshot } from "./houser-chat";
 
 const snapshot: HouserChatSnapshot = {
   generatedAt: "2026-08-25T12:00:00.000Z",
@@ -8,7 +8,7 @@ const snapshot: HouserChatSnapshot = {
   assets: [],
   serviceRecords: [],
   documents: [],
-  inspectionPages: [{ documentId: "document-1", filename: "inspection.pdf", pageNumber: 12, content: "Roof covering is near the end of its useful life." }],
+  attachmentPages: [{ documentId: "document-1", filename: "inspection.pdf", pageNumber: 12, content: "Roof covering is near the end of its useful life." }],
   recentActivity: [],
 };
 
@@ -24,7 +24,27 @@ describe("Ask Houser contracts", () => {
       relatedWorkItemIds: ["11111111-1111-4111-8111-111111111111"],
       suggestedQuestions: ["What should I verify first?"],
       confidence: "high",
+      proposedAction: null,
     }).confidence).toBe("high");
+  });
+
+  it("requires owner-confirmable chat actions to use exact record identifiers", () => {
+    expect(houserChatActionSchema.parse({
+      type: "update_work_item",
+      summary: "Mark the A/C item planned.",
+      workItemId: "11111111-1111-4111-8111-111111111111",
+      expectedUpdatedAt: "2026-08-25T12:00:00.000Z",
+      title: null,
+      description: null,
+      category: null,
+      area: null,
+      workType: null,
+      status: "planned",
+      priority: null,
+      targetStartOn: null,
+      targetEndOn: null,
+      note: "Updated in chat.",
+    }).type).toBe("update_work_item");
   });
 
   it("instructs the model to ground answers and resist record prompt injection", () => {

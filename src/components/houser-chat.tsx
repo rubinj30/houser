@@ -1,8 +1,9 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, Bot, CheckCircle2, LoaderCircle, Send, ShieldCheck, Sparkles, Wrench } from "lucide-react";
+import { ArrowLeft, ArrowRight, Bot, CheckCircle2, LoaderCircle, PencilLine, PlusCircle, Send, ShieldCheck, Sparkles, Wrench, X } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import type { HouserChatAction } from "@/lib/houser-chat";
 
 type RelatedWorkItem = {
   id: string;
@@ -23,6 +24,10 @@ type ChatMessage = {
   confidence?: "high" | "medium" | "low";
   relatedWorkItems?: RelatedWorkItem[];
   suggestedQuestions?: string[];
+  proposedAction?: HouserChatAction | null;
+  actionApplying?: boolean;
+  actionResult?: { message: string; reference: string; title: string };
+  actionError?: string;
 };
 
 type ChatError = {
@@ -96,12 +101,42 @@ export function HouserChat({ userEmail, propertyName }: { userEmail: string; pro
         confidence: result.confidence,
         relatedWorkItems: result.relatedWorkItems,
         suggestedQuestions: result.suggestedQuestions,
+        proposedAction: result.proposedAction,
       }]);
     } catch (cause) {
       setError({ message: cause instanceof Error ? cause.message : "Houser could not answer that question." });
     } finally {
       setIsSending(false);
     }
+  };
+
+  const applyAction = async (messageId: string, action: HouserChatAction) => {
+    setMessages((current) => current.map((message) => message.id === messageId ? { ...message, actionApplying: true, actionError: undefined } : message));
+    try {
+      const response = await fetch("/api/chat/actions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(action),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "The change could not be saved.");
+      setMessages((current) => current.map((message) => message.id === messageId ? {
+        ...message,
+        actionApplying: false,
+        proposedAction: null,
+        actionResult: { message: result.message, reference: result.workItem.reference, title: result.workItem.title },
+      } : message));
+    } catch (cause) {
+      setMessages((current) => current.map((message) => message.id === messageId ? {
+        ...message,
+        actionApplying: false,
+        actionError: cause instanceof Error ? cause.message : "The change could not be saved.",
+      } : message));
+    }
+  };
+
+  const dismissAction = (messageId: string) => {
+    setMessages((current) => current.map((message) => message.id === messageId ? { ...message, proposedAction: null, actionError: undefined } : message));
   };
 
   const submit = (event: React.FormEvent) => {
@@ -124,6 +159,8 @@ export function HouserChat({ userEmail, propertyName }: { userEmail: string; pro
           <div className={`max-w-[min(88%,44rem)] ${message.role === "user" ? "rounded-[22px] rounded-br-md bg-[var(--forest)] px-4 py-3 text-white" : "min-w-0"}`}>
             {message.role === "assistant" ? <div className="rounded-[22px] rounded-tl-md border border-black/6 bg-[var(--paper)] p-4 surface-shadow sm:p-5"><p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>{message.confidence ? <p className="mt-3 flex items-center gap-1.5 text-[10px] font-bold capitalize text-[var(--muted)]"><CheckCircle2 className="size-3.5 text-[var(--forest)]"/> {message.confidence} confidence from current records</p> : null}</div> : <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>}
             {message.relatedWorkItems?.length ? <div className="mt-3 space-y-2"><p className="px-1 text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--muted)]">Related work</p>{message.relatedWorkItems.map((item) => <Link key={item.id} href={`/?work=${encodeURIComponent(item.reference)}`} className="group flex items-center justify-between gap-3 rounded-[18px] border border-black/7 bg-white p-3.5 surface-shadow hover:border-[var(--forest)]/25"><div className="flex min-w-0 items-center gap-3"><div className="grid size-9 shrink-0 place-items-center rounded-xl bg-[var(--mint)] text-[var(--forest)]"><Wrench className="size-4"/></div><div className="min-w-0"><p className="truncate text-xs font-extrabold">{item.title}</p><p className="mt-1 truncate text-[10px] capitalize text-[var(--muted)]">{item.category ?? "General"} · {item.priority} · {formatTarget(item)}</p></div></div><ArrowRight className="size-4 shrink-0 text-[var(--muted)] transition group-hover:translate-x-0.5 group-hover:text-[var(--forest)]"/></Link>)}</div> : null}
+            {message.proposedAction ? <section className="mt-3 rounded-[18px] border border-[var(--forest)]/20 bg-[var(--mint)]/45 p-4" aria-label="Proposed Houser change"><div className="flex items-start gap-3"><div className="grid size-9 shrink-0 place-items-center rounded-xl bg-[var(--forest)] text-white">{message.proposedAction.type === "create_work_item" ? <PlusCircle className="size-4"/> : <PencilLine className="size-4"/>}</div><div className="min-w-0"><p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--forest)]">Review before saving</p><h2 className="mt-1 text-sm font-extrabold">{message.proposedAction.type === "create_work_item" ? "Create work item" : "Update work item"}</h2><p className="mt-1 text-xs leading-5 text-[var(--muted)]">{message.proposedAction.summary}</p></div></div>{message.actionError ? <p role="alert" className="mt-3 rounded-xl bg-[#f8ddd7] px-3 py-2 text-xs font-bold text-[#8c3328]">{message.actionError}</p> : null}<div className="mt-4 grid grid-cols-2 gap-2"><button type="button" onClick={() => dismissAction(message.id)} disabled={message.actionApplying} className="flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-black/10 bg-white text-xs font-extrabold disabled:opacity-40"><X className="size-3.5"/> Not now</button><button type="button" onClick={() => void applyAction(message.id, message.proposedAction!)} disabled={message.actionApplying} className="flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-[var(--forest)] px-3 text-xs font-extrabold text-white disabled:opacity-50">{message.actionApplying ? <LoaderCircle className="size-4 animate-spin"/> : <CheckCircle2 className="size-4"/>}{message.actionApplying ? "Saving…" : "Confirm & save"}</button></div></section> : null}
+            {message.actionResult ? <Link href={`/?work=${encodeURIComponent(message.actionResult.reference)}`} className="mt-3 flex items-center justify-between gap-3 rounded-[18px] border border-[var(--forest)]/15 bg-white p-3.5 text-[var(--forest)] surface-shadow"><div><p className="text-[10px] font-extrabold uppercase tracking-[0.12em]">Saved</p><p className="mt-1 text-xs font-extrabold text-[var(--ink)]">{message.actionResult.title}</p></div><ArrowRight className="size-4"/></Link> : null}
             {message.suggestedQuestions?.length && index === messages.length - 1 ? <div className="mt-3 flex flex-wrap gap-2">{message.suggestedQuestions.map((question) => <button key={question} type="button" onClick={() => void ask(question)} className="min-h-10 rounded-xl border border-[var(--forest)]/15 bg-[var(--mint)]/45 px-3 text-left text-xs font-bold text-[var(--forest)]">{question}</button>)}</div> : null}
           </div>
         </article>)}

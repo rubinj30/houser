@@ -46,11 +46,24 @@ export async function POST(request: Request) {
       }];
     });
 
+    const proposedAction = (() => {
+      const action = answer.proposedAction;
+      if (!action) return null;
+      if (action.type === "create_work_item") {
+        const propertyExists = chatData.snapshot.properties.some((property) => property.id === action.propertyId);
+        return propertyExists ? action : null;
+      }
+      const item = chatData.workItemIndex.get(action.workItemId);
+      if (!item || item.updatedAt !== action.expectedUpdatedAt) return null;
+      return action;
+    })();
+
     return NextResponse.json({
       answer: answer.answer,
       confidence: answer.confidence,
       suggestedQuestions: answer.suggestedQuestions,
       relatedWorkItems,
+      proposedAction,
     });
   } catch (error) {
     console.error("Ask Houser failed", error);

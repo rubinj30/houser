@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import OpenAI from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
 import { NextResponse } from "next/server";
@@ -5,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { INSPECTION_EXTRACTION_PROMPT, INSPECTION_MODEL, inspectionExtractionSchema } from "@/lib/inspection-extraction";
 import { buildDocumentExtractionPrompt, DOCUMENT_EXTRACTION_MODEL, normalizedDocumentSchema } from "@/lib/document-extraction";
 import { extractDocumentTextPages } from "@/lib/pdf-text";
+import { buildPhotoSearchContent, PHOTO_EXTRACTION_MODEL, PHOTO_EXTRACTION_PROMPT, photoExtractionSchema } from "@/lib/photo-extraction";
 
 export const maxDuration = 300;
 
@@ -19,13 +21,14 @@ export async function POST(_request: Request, { params }: Context) {
 
   const { data: document } = await supabase
     .from("documents")
-    .select("id, property_id, document_type, storage_key, original_filename, sha256")
+    .select("id, property_id, document_type, storage_bucket, storage_key, original_filename, mime_type, sha256")
     .eq("id", documentId)
     .maybeSingle();
-  if (!document || !["inspection", "quote", "invoice", "receipt"].includes(document.document_type)) return NextResponse.json({ error: "Supported document not found." }, { status: 404 });
+  if (!document || !["inspection", "quote", "invoice", "receipt", "photo"].includes(document.document_type)) return NextResponse.json({ error: "Supported attachment not found." }, { status: 404 });
 
   const isInspection = document.document_type === "inspection";
-  const model = isInspection ? INSPECTION_MODEL : DOCUMENT_EXTRACTION_MODEL;
+  const isPhoto = document.document_type === "photo";
+  const model = isPhoto ? PHOTO_EXTRACTION_MODEL : isInspection ? INSPECTION_MODEL : DOCUMENT_EXTRACTION_MODEL;
 
   const { data: run, error: runError } = await supabase.from("extraction_runs").insert({
     document_id: document.id,
@@ -39,12 +42,13 @@ export async function POST(_request: Request, { params }: Context) {
   await supabase.from("documents").update({ status: "processing", processing_error_code: null }).eq("id", document.id);
 
   try {
-    const { data: signed, error: signedError } = await supabase.storage.from("documents").createSignedUrl(document.storage_key, 1800);
-    if (signedError || !signed?.signedUrl) throw new Error("The uploaded PDF could not be opened securely.");
+    const storageBucket = document.storage_bucket ?? "documents";
+    const { data: signed, error: signedError } = await supabase.storage.from(storageBucket).createSignedUrl(document.storage_key, 1800);
+    if (signedError || !signed?.signedUrl) throw new Error("The uploaded attachment could not be opened securely.");
 
-    if (isInspection) {
+    if (!isPhoto) {
       const pdfResponse = await fetch(signed.signedUrl);
-      if (!pdfResponse.ok) throw new Error("The uploaded inspection PDF could not be read for text indexing.");
+      if (!pdfResponse.ok) throw new Error("The uploaded PDF could not be read for text indexing.");
       const pages = await extractDocumentTextPages(await pdfResponse.arrayBuffer());
       const { error: pagesError } = await supabase.from("document_text_pages").upsert(
         pages.map((page) => ({
@@ -55,16 +59,20 @@ export async function POST(_request: Request, { params }: Context) {
         })),
         { onConflict: "document_id,page_number" },
       );
-      if (pagesError) throw new Error(`The inspection text could not be indexed: ${pagesError.message}`);
+      if (pagesError) throw new Error(`The attachment text could not be indexed: ${pagesError.message}`);
       await supabase.from("document_text_pages").delete().eq("document_id", document.id).gt("page_number", pages.length);
       await supabase.from("documents").update({ page_count: pages.length }).eq("id", document.id);
     }
 
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    const format = isInspection
-      ? zodTextFormat(inspectionExtractionSchema, "inspection_extraction")
-      : zodTextFormat(normalizedDocumentSchema, "normalized_document");
-    const prompt = isInspection
+    const format = isPhoto
+      ? zodTextFormat(photoExtractionSchema, "photo_extraction")
+      : isInspection
+        ? zodTextFormat(inspectionExtractionSchema, "inspection_extraction")
+        : zodTextFormat(normalizedDocumentSchema, "normalized_document");
+    const prompt = isPhoto
+      ? PHOTO_EXTRACTION_PROMPT
+      : isInspection
       ? INSPECTION_EXTRACTION_PROMPT
       : buildDocumentExtractionPrompt({
           documentType: document.document_type as "quote" | "invoice" | "receipt",
@@ -72,24 +80,32 @@ export async function POST(_request: Request, { params }: Context) {
           privateObjectKey: document.storage_key,
           sha256: document.sha256 ?? "0".repeat(64),
         });
+    const content = isPhoto
+      ? [
+          { type: "input_text" as const, text: prompt },
+          { type: "input_image" as const, image_url: signed.signedUrl, detail: "high" as const },
+        ]
+      : [
+          { type: "input_file" as const, file_url: signed.signedUrl, detail: "high" as const },
+          { type: "input_text" as const, text: prompt },
+        ];
     const response = await openai.responses.parse({
       model,
       store: false,
       reasoning: { effort: "low" },
       input: [{
         role: "user",
-        content: [
-          { type: "input_file", file_url: signed.signedUrl, detail: "high" },
-          { type: "input_text", text: prompt },
-        ],
+        content,
       }],
       text: { format },
     });
 
     if (!response.output_parsed) throw new Error("The document could not be converted into structured information.");
-    const result = isInspection
-      ? inspectionExtractionSchema.parse(response.output_parsed)
-      : normalizedDocumentSchema.parse(response.output_parsed);
+    const result = isPhoto
+      ? photoExtractionSchema.parse(response.output_parsed)
+      : isInspection
+        ? inspectionExtractionSchema.parse(response.output_parsed)
+        : normalizedDocumentSchema.parse(response.output_parsed);
     if ("document" in result) {
       const extractedTypeMatches = document.document_type === "invoice"
         ? result.document.type === "invoice"
@@ -102,9 +118,24 @@ export async function POST(_request: Request, { params }: Context) {
       result.document.sourceFile.sha256 = document.sha256 ?? result.document.sourceFile.sha256;
     }
     const usage = response.usage;
-    const extractedDocumentDate = "report" in result ? result.report.inspectionDate : result.document.issuedOn.value;
+    if (isPhoto && "summary" in result) {
+      const searchableContent = buildPhotoSearchContent(result);
+      const { error: photoPageError } = await supabase.from("document_text_pages").upsert({
+        document_id: document.id,
+        page_number: 1,
+        content: searchableContent,
+        content_sha256: createHash("sha256").update(searchableContent).digest("hex"),
+      }, { onConflict: "document_id,page_number" });
+      if (photoPageError) throw new Error(`The photo analysis could not be indexed: ${photoPageError.message}`);
+    }
+
+    const extractedDocumentDate = "report" in result
+      ? result.report.inspectionDate
+      : "document" in result
+        ? result.document.issuedOn.value
+        : null;
     const documentDate = extractedDocumentDate && /^\d{4}-\d{2}-\d{2}$/.test(extractedDocumentDate) ? extractedDocumentDate : null;
-    const pageCount = "report" in result ? result.report.pageCount : result.document.sourceFile.pageCount;
+    const pageCount = "report" in result ? result.report.pageCount : "document" in result ? result.document.sourceFile.pageCount : 1;
 
     await Promise.all([
       supabase.from("extraction_runs").update({
@@ -128,11 +159,17 @@ export async function POST(_request: Request, { params }: Context) {
       findings: result.findings,
       reviewWarnings: result.reviewWarnings,
       usage: usage ? { inputTokens: usage.input_tokens, outputTokens: usage.output_tokens } : null,
-    } : {
+    } : "document" in result ? {
       documentType: document.document_type,
       documentId: document.id,
       runId: run.id,
       normalized: result,
+      usage: usage ? { inputTokens: usage.input_tokens, outputTokens: usage.output_tokens } : null,
+    } : {
+      documentType: "photo",
+      documentId: document.id,
+      runId: run.id,
+      analysis: result,
       usage: usage ? { inputTokens: usage.input_tokens, outputTokens: usage.output_tokens } : null,
     });
   } catch (error) {

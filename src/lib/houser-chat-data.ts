@@ -10,7 +10,7 @@ function relatedName(value: unknown) {
   return null;
 }
 
-const broadInspectionQuestion = /\b(all|anything|everything|entire|full|global|inspection|overall|report|summary|summarize|whole)\b/i;
+const broadAttachmentQuestion = /\b(all|anything|everything|entire|full|global|inspection|attachment|document|overall|report|summary|summarize|whole)\b/i;
 
 function fitInspectionPages<T extends { content: string }>(pages: T[], characterLimit: number) {
   const selected: T[] = [];
@@ -52,7 +52,7 @@ export async function getHouserChatData(question = "") {
   const [workResult, assetResult, serviceResult, documentResult, activityResult] = await Promise.all([
     supabase
       .from("work_items")
-      .select("id,property_id,source_key,source_section,title,description,work_type,status,priority,safety_flags,target_start_on,target_end_on,completed_at,estimated_cost_minor,currency,source_type,source_location,categories(name),areas(name),assets(name)")
+      .select("id,property_id,source_key,source_section,title,description,work_type,status,priority,safety_flags,target_start_on,target_end_on,completed_at,estimated_cost_minor,currency,source_type,source_location,updated_at,categories(name),areas(name),assets(name)")
       .in("property_id", propertyIds)
       .is("archived_at", null)
       .order("created_at", { ascending: false }),
@@ -69,7 +69,7 @@ export async function getHouserChatData(question = "") {
       .limit(200),
     supabase
       .from("documents")
-      .select("id,property_id,document_type,original_filename,document_date,status,storage_bucket,storage_key")
+      .select("id,property_id,document_type,original_filename,mime_type,document_date,status,storage_bucket,storage_key")
       .in("property_id", propertyIds)
       .neq("status", "failed")
       .order("created_at", { ascending: false })
@@ -86,28 +86,26 @@ export async function getHouserChatData(question = "") {
   if (failed?.error) throw new Error(`Could not prepare Houser chat data: ${failed.error.message}`);
 
   const documents = documentResult.data ?? [];
-  const inspectionDocumentIds = documents
-    .filter((document) => document.document_type === "inspection")
-    .map((document) => document.id);
+  const documentIds = documents.map((document) => document.id);
   const documentIndex = new Map(documents.map((document) => [document.id, document]));
-  let inspectionPageRows: Array<{ document_id: string; page_number: number; content: string }> = [];
-  if (inspectionDocumentIds.length) {
+  let attachmentPageRows: Array<{ document_id: string; page_number: number; content: string }> = [];
+  if (documentIds.length) {
     const { data: indexedDocuments, error: indexedDocumentsError } = await supabase
       .from("document_text_pages")
       .select("document_id")
-      .in("document_id", inspectionDocumentIds)
+      .in("document_id", documentIds)
       .limit(1000);
-    if (indexedDocumentsError) throw new Error(`Could not check inspection text for Houser chat: ${indexedDocumentsError.message}`);
+    if (indexedDocumentsError) throw new Error(`Could not check attachment text for Houser chat: ${indexedDocumentsError.message}`);
     const indexedIds = new Set((indexedDocuments ?? []).map((page) => page.document_id));
-    const missingDocuments = documents.filter((document) => document.document_type === "inspection" && !indexedIds.has(document.id));
+    const missingDocuments = documents.filter((document) => document.mime_type === "application/pdf" && !indexedIds.has(document.id));
 
     await Promise.all(missingDocuments.map(async (document) => {
       try {
         const bucket = document.storage_bucket ?? "documents";
         const { data: signed, error: signedError } = await supabase.storage.from(bucket).createSignedUrl(document.storage_key, 300);
-        if (signedError || !signed?.signedUrl) throw new Error("Private inspection PDF could not be opened.");
+        if (signedError || !signed?.signedUrl) throw new Error("Private PDF could not be opened.");
         const response = await fetch(signed.signedUrl);
-        if (!response.ok) throw new Error("Private inspection PDF could not be downloaded.");
+        if (!response.ok) throw new Error("Private PDF could not be downloaded.");
         const pages = await extractDocumentTextPages(await response.arrayBuffer());
         const { error: upsertError } = await supabase.from("document_text_pages").upsert(
           pages.map((page) => ({
@@ -121,22 +119,22 @@ export async function getHouserChatData(question = "") {
         if (upsertError) throw upsertError;
         await supabase.from("documents").update({ page_count: pages.length }).eq("id", document.id);
       } catch (error) {
-        console.error("Could not backfill inspection text for Ask Houser", { documentId: document.id, error });
+        console.error("Could not backfill attachment text for Ask Houser", { documentId: document.id, error });
       }
     }));
 
     let pageQuery = supabase
       .from("document_text_pages")
       .select("document_id,page_number,content")
-      .in("document_id", inspectionDocumentIds);
-    if (broadInspectionQuestion.test(question)) {
+      .in("document_id", documentIds);
+    if (broadAttachmentQuestion.test(question)) {
       pageQuery = pageQuery.order("document_id").order("page_number").limit(200);
     } else {
-      pageQuery = pageQuery.textSearch("search_vector", buildInspectionSearchQuery(question), { config: "english", type: "websearch" }).limit(16);
+      pageQuery = pageQuery.textSearch("search_vector", buildInspectionSearchQuery(question), { config: "english", type: "websearch" }).limit(8);
     }
     const { data: pages, error: pagesError } = await pageQuery;
-    if (pagesError) throw new Error(`Could not retrieve inspection text for Houser chat: ${pagesError.message}`);
-    inspectionPageRows = pages ?? [];
+    if (pagesError) throw new Error(`Could not retrieve attachment text for Houser chat: ${pagesError.message}`);
+    attachmentPageRows = pages ?? [];
   }
 
   const workItems = (workResult.data ?? []).map((item) => ({
@@ -159,6 +157,7 @@ export async function getHouserChatData(question = "") {
     estimatedCostMinor: item.estimated_cost_minor === null ? null : Number(item.estimated_cost_minor),
     currency: item.currency,
     sourceType: item.source_type,
+    updatedAt: item.updated_at,
   }));
 
   const snapshot: HouserChatSnapshot = {
@@ -210,16 +209,17 @@ export async function getHouserChatData(question = "") {
       date: document.document_date,
       status: document.status,
     })),
-    inspectionPages: fitInspectionPages(inspectionPageRows.map((page) => {
+    attachmentPages: fitInspectionPages(attachmentPageRows.map((page) => {
       const document = documentIndex.get(page.document_id);
       return {
         documentId: page.document_id,
         property: document ? propertyNames.get(document.property_id) ?? "Unknown property" : "Unknown property",
-        filename: document?.original_filename ?? "Inspection report",
+        type: document?.document_type ?? "other",
+        filename: document?.original_filename ?? "Attachment",
         pageNumber: page.page_number,
         content: page.content,
       };
-    }), broadInspectionQuestion.test(question) ? 120_000 : 36_000),
+    }), broadAttachmentQuestion.test(question) ? 80_000 : 18_000),
     recentActivity: (activityResult.data ?? []).map((activity) => ({
       id: activity.id,
       property: propertyNames.get(activity.property_id) ?? "Unknown property",
