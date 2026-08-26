@@ -21,6 +21,7 @@ import {
   ExternalLink,
   Layers3,
   LayoutDashboard,
+  Link2,
   ListTodo,
   LogOut,
   MoreHorizontal,
@@ -66,6 +67,17 @@ type WorkIntent = {
   revision: number;
 };
 type CompletionDetails = Omit<WorkCompletionInput, "workItemId" | "reportId">;
+type RelatedWorkGroup = {
+  group: { id: string; label: string } | null;
+  relatedItems: Array<{
+    id: string;
+    title: string;
+    sourceSection: string | null;
+    category: string | null;
+    status: string;
+    priority: string;
+  }>;
+};
 const reviewStatusLabels: Record<ReviewStatus, string> = {
   needs_review: "Needs review",
   open: "Still needs work",
@@ -394,7 +406,7 @@ function WorkView({ findings, calendarProperty, initialCategory, initialSeverity
       <div className="mt-2 grid gap-3 xl:grid-cols-2">{filtered.map((item) => <FindingCard key={item.workItemId ?? item.reportId} item={item} status={reviewStatuses[item.reportId] ?? "needs_review"} menuOpen={menuItemId === item.reportId} onOpen={() => { setMenuItemId(null); setRequestedStatus(null); setSelectedItem(item); }} onToggleMenu={() => setMenuItemId((current) => current === item.reportId ? null : item.reportId)} onSetStatus={(status) => { setMenuItemId(null); setRequestedStatus(status); setSelectedItem(item); }} />)}</div>
       {filtered.length === 0 ? <div className="mt-8 rounded-[24px] border border-dashed border-black/15 p-10 text-center"><Search className="mx-auto size-7 text-[var(--muted)]"/><h2 className="font-display mt-3 text-lg font-extrabold">{scope === "history" && historyCount === 0 ? "No closed work yet" : "No matching work"}</h2><p className="mt-1 text-sm text-[var(--muted)]">{scope === "history" && historyCount === 0 ? "Completed and dismissed items will appear here." : "Try another search or clear a filter."}</p></div> : null}
     </div>
-    {selectedItem ? <FindingReviewDialog key={`${selectedItem.reportId}-${requestedStatus ?? "details"}`} item={selectedItem} calendarProperty={calendarProperty} status={reviewStatuses[selectedItem.reportId] ?? "needs_review"} activities={reviewActivities.filter((activity) => activity.reportId === selectedItem.reportId)} serviceRecords={serviceRecords.filter((record) => record.reportId === selectedItem.reportId)} initialStatus={requestedStatus} onClose={() => { setSelectedItem(null); setRequestedStatus(null); }} onRecordReview={(status, note) => onRecordReview(selectedItem.reportId, status, note)} onCompleteWork={(details) => onCompleteWork(selectedItem.reportId, details)} onAttachDocument={() => onAttachDocument(selectedItem)} /> : null}
+    {selectedItem ? <FindingReviewDialog key={`${selectedItem.reportId}-${requestedStatus ?? "details"}`} item={selectedItem} findings={findings} calendarProperty={calendarProperty} status={reviewStatuses[selectedItem.reportId] ?? "needs_review"} activities={reviewActivities.filter((activity) => activity.reportId === selectedItem.reportId)} serviceRecords={serviceRecords.filter((record) => record.reportId === selectedItem.reportId)} initialStatus={requestedStatus} onClose={() => { setSelectedItem(null); setRequestedStatus(null); }} onOpenRelated={(workItemId) => { const relatedItem = findings.find((finding) => finding.workItemId === workItemId); if (relatedItem) { setRequestedStatus(null); setSelectedItem(relatedItem); } }} onRecordReview={(status, note) => onRecordReview(selectedItem.reportId, status, note)} onCompleteWork={(details) => onCompleteWork(selectedItem.reportId, details)} onAttachDocument={() => onAttachDocument(selectedItem)} /> : null}
     </>
   );
 }
@@ -413,7 +425,7 @@ function ReviewStatusPill({ status }: { status: ReviewStatus }) {
   return <span className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold ${style}`}>{reviewStatusLabels[status]}</span>;
 }
 
-function FindingReviewDialog({ item, calendarProperty, status, activities, serviceRecords, initialStatus, onClose, onRecordReview, onCompleteWork, onAttachDocument }: { item: Finding; calendarProperty: CalendarProperty; status: ReviewStatus; activities: ReviewActivity[]; serviceRecords: ServiceRecord[]; initialStatus: ReviewStatus | null; onClose: () => void; onRecordReview: (status: ReviewStatus, note: string) => Promise<void>; onCompleteWork: (details: CompletionDetails) => Promise<unknown>; onAttachDocument: () => void }) {
+function FindingReviewDialog({ item, findings, calendarProperty, status, activities, serviceRecords, initialStatus, onClose, onOpenRelated, onRecordReview, onCompleteWork, onAttachDocument }: { item: Finding; findings: Finding[]; calendarProperty: CalendarProperty; status: ReviewStatus; activities: ReviewActivity[]; serviceRecords: ServiceRecord[]; initialStatus: ReviewStatus | null; onClose: () => void; onOpenRelated: (workItemId: string) => void; onRecordReview: (status: ReviewStatus, note: string) => Promise<void>; onCompleteWork: (details: CompletionDetails) => Promise<unknown>; onAttachDocument: () => void }) {
   const [pendingStatus, setPendingStatus] = useState<ReviewStatus | null>(initialStatus);
   const [note, setNote] = useState("");
   const [isSaving, setIsSaving] = useState(false);
@@ -467,8 +479,8 @@ function FindingReviewDialog({ item, calendarProperty, status, activities, servi
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-end bg-[#0d1e17]/45 backdrop-blur-sm sm:p-4" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
-      <section role="dialog" aria-modal="true" aria-labelledby="finding-review-title" className="max-h-[92dvh] w-full overflow-y-auto rounded-t-[28px] bg-[var(--paper)] shadow-2xl sm:h-full sm:max-h-none sm:max-w-xl sm:rounded-[28px]">
+    <div className="fixed inset-0 z-50 grid items-end bg-[#0d1e17]/45 backdrop-blur-sm sm:place-items-center sm:p-6" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
+      <section role="dialog" aria-modal="true" aria-labelledby="finding-review-title" className="max-h-[92dvh] w-full overflow-y-auto rounded-t-[28px] bg-[var(--paper)] shadow-2xl sm:max-h-[calc(100dvh-3rem)] sm:max-w-2xl sm:rounded-[28px]">
         <div className="sticky top-0 z-10 flex items-start justify-between border-b border-black/6 bg-[rgba(252,251,248,0.94)] p-5 backdrop-blur-xl sm:p-7">
           <div className="pr-4">
             <p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--forest)]">{item.sourceReference ?? item.reportId} · {item.category}{item.propertyName ? ` · ${item.propertyName}` : ""}</p>
@@ -483,6 +495,7 @@ function FindingReviewDialog({ item, calendarProperty, status, activities, servi
           {item.targetStartOn ? <CalendarActions item={item} property={calendarProperty} /> : null}
           <InspectionEvidenceCard item={item} />
           <LinkedWorkDocuments workItemId={item.workItemId} onAddDocument={onAttachDocument} />
+          <RelatedWorkCard item={item} findings={findings} onOpenItem={onOpenRelated} />
           <section>
             <p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--muted)]">Owner review</p>
             <p className="mt-2 text-sm leading-6 text-[var(--muted)]">Confirm the current condition before turning this historical inspection finding into active work.</p>
@@ -565,6 +578,97 @@ function LinkedWorkDocuments({ workItemId, onAddDocument }: { workItemId?: strin
   return <section className="rounded-[22px] border border-black/7 bg-white/65 p-4">
     <div className="flex items-center justify-between gap-3"><div className="flex min-w-0 items-center gap-2"><FileText className="size-4 shrink-0 text-[var(--forest)]"/><div><p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--muted)]">Attachments</p><p className="mt-0.5 text-xs font-bold">{documents.length} {documents.length === 1 ? "attachment" : "attachments"}</p></div></div><button type="button" onClick={onAddDocument} className="flex min-h-10 shrink-0 items-center gap-1.5 rounded-xl border border-[var(--forest)]/15 bg-[var(--mint)]/45 px-3 text-xs font-extrabold text-[var(--forest)]"><Plus className="size-3.5"/> Add file</button></div>
     {isPending ? <p className="mt-3 text-xs font-bold text-[var(--muted)]">Loading attachments…</p> : loadError ? <p role="alert" className="mt-3 text-xs font-bold text-[#8c3328]">{loadError}</p> : documents.length ? <div className="mt-3 space-y-2">{documents.map((document) => <a key={document.id} href={`/api/documents/${document.id}/view`} target="_blank" rel="noreferrer" className="flex min-h-14 items-center justify-between gap-3 rounded-xl border border-black/7 bg-white px-3 py-2.5 transition hover:border-[var(--forest)]/25 hover:bg-[var(--mint)]/20" aria-label={`Open original ${document.documentType}: ${document.filename}`}><div className="flex min-w-0 items-center gap-3"><div className="grid size-9 shrink-0 place-items-center rounded-lg bg-black/[0.035]">{document.documentType === "photo" ? <ImageIcon className="size-4 text-[var(--forest)]"/> : <FileText className="size-4 text-[var(--forest)]"/>}</div><div className="min-w-0"><p className="truncate text-xs font-extrabold">{document.filename}</p><p className="mt-1 text-[10px] capitalize text-[var(--muted)]">{document.documentType}{document.documentDate ? ` · ${formatDateOnly(document.documentDate)}` : ""}</p></div></div><span className="flex shrink-0 items-center gap-1 text-[10px] font-extrabold text-[var(--forest)]">Open original <ExternalLink className="size-3.5"/></span></a>)}</div> : <p className="mt-3 rounded-xl border border-dashed border-black/10 px-3 py-4 text-xs leading-5 text-[var(--muted)]">No photos, quotes, invoices, or receipts attached yet. The inspection remains available in the evidence preview above.</p>}
+  </section>;
+}
+
+function RelatedWorkCard({ item, findings, onOpenItem }: { item: Finding; findings: Finding[]; onOpenItem: (workItemId: string) => void }) {
+  const [group, setGroup] = useState<RelatedWorkGroup | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [label, setLabel] = useState("Related work");
+  const [query, setQuery] = useState("");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [error, setError] = useState("");
+  const workItemId = item.workItemId;
+
+  useEffect(() => {
+    if (!workItemId) return;
+    const controller = new AbortController();
+    void fetch(`/api/work-items/${workItemId}/related`, { signal: controller.signal, cache: "no-store" })
+      .then(async (response) => {
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error ?? "Related work could not be loaded.");
+        return result as RelatedWorkGroup;
+      })
+      .then((result) => {
+        setGroup(result);
+        setLabel(result.group?.label ?? "Related work");
+        setSelectedIds(result.relatedItems.map((relatedItem) => relatedItem.id));
+      })
+      .catch((loadError: unknown) => {
+        if (loadError instanceof DOMException && loadError.name === "AbortError") return;
+        setError(loadError instanceof Error ? loadError.message : "Related work could not be loaded.");
+      })
+      .finally(() => { if (!controller.signal.aborted) setIsLoading(false); });
+    return () => controller.abort();
+  }, [workItemId]);
+
+  const candidates = useMemo(() => {
+    const search = query.trim().toLowerCase();
+    return findings
+      .filter((finding) => finding.workItemId && finding.workItemId !== workItemId)
+      .filter((finding) => !search || [finding.title, finding.reportId, finding.category, finding.area, finding.location].some((value) => value.toLowerCase().includes(search)))
+      .sort((a, b) => Number(selectedIds.includes(b.workItemId!)) - Number(selectedIds.includes(a.workItemId!)) || a.title.localeCompare(b.title))
+      .slice(0, 12);
+  }, [findings, query, selectedIds, workItemId]);
+
+  if (!workItemId) return null;
+
+  const toggleCandidate = (candidateId: string) => {
+    const existingIds = new Set(group?.relatedItems.map((relatedItem) => relatedItem.id) ?? []);
+    if (existingIds.has(candidateId)) return;
+    setSelectedIds((current) => current.includes(candidateId) ? current.filter((id) => id !== candidateId) : [...current, candidateId]);
+  };
+
+  const save = async () => {
+    setIsSaving(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/work-items/${workItemId}/related`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ label, workItemIds: selectedIds }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "Related work could not be saved.");
+      const savedGroup = result as RelatedWorkGroup;
+      setGroup(savedGroup);
+      setLabel(savedGroup.group?.label ?? label);
+      setSelectedIds(savedGroup.relatedItems.map((relatedItem) => relatedItem.id));
+      setQuery("");
+      setIsEditing(false);
+    } catch (saveError: unknown) {
+      setError(saveError instanceof Error ? saveError.message : "Related work could not be saved.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return <section className="rounded-[22px] border border-black/7 bg-white/65 p-4">
+    <div className="flex items-center justify-between gap-3">
+      <div className="flex min-w-0 items-center gap-2"><Link2 className="size-4 shrink-0 text-[var(--forest)]"/><div><p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--muted)]">Related work</p><p className="mt-0.5 truncate text-xs font-bold">{group?.group?.label ?? "Coordinate work that belongs together"}</p></div></div>
+      <button type="button" onClick={() => setIsEditing((current) => !current)} className="min-h-10 shrink-0 rounded-xl border border-[var(--forest)]/15 bg-[var(--mint)]/45 px-3 text-xs font-extrabold text-[var(--forest)]">{isEditing ? "Cancel" : group?.group ? "Add work" : "Link work"}</button>
+    </div>
+    {isLoading ? <p className="mt-3 text-xs font-bold text-[var(--muted)]">Loading related work…</p> : group?.relatedItems.length ? <div className="mt-3 space-y-2">{group.relatedItems.map((relatedItem) => { const localItem = findings.find((finding) => finding.workItemId === relatedItem.id); return <button key={relatedItem.id} type="button" onClick={() => onOpenItem(relatedItem.id)} className="group/related flex min-h-14 w-full items-center justify-between gap-3 rounded-xl border border-black/7 bg-white px-3 py-2.5 text-left transition hover:border-[var(--forest)]/25 hover:bg-[var(--mint)]/20"><div className="min-w-0"><p className="truncate text-xs font-extrabold">{relatedItem.title}</p><p className="mt-1 text-[10px] uppercase tracking-[0.08em] text-[var(--muted)]">{localItem?.reportId ?? relatedItem.sourceSection ?? "Work item"}{localItem?.category || relatedItem.category ? ` · ${localItem?.category ?? relatedItem.category}` : ""}</p></div><ArrowRight className="size-4 shrink-0 text-[var(--forest)] transition group-hover/related:translate-x-0.5"/></button>; })}</div> : !isEditing && !error ? <p className="mt-3 rounded-xl border border-dashed border-black/10 px-3 py-4 text-xs leading-5 text-[var(--muted)]">Link jobs you want a contractor to review during the same visit. Every linked item will point back to the others.</p> : null}
+    {isEditing ? <div className="mt-4 rounded-2xl bg-[var(--mint)]/35 p-3">
+      <label className="block"><span className="text-[10px] font-extrabold uppercase tracking-[0.1em] text-[var(--muted)]">Group name</span><input value={label} maxLength={120} onChange={(event) => setLabel(event.target.value)} placeholder="e.g. Mason visit" className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 text-sm"/></label>
+      <label className="relative mt-3 block"><span className="sr-only">Search work to link</span><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--muted)]"/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search work to link" className="h-11 w-full rounded-xl border border-black/10 bg-white pl-9 pr-3 text-sm"/></label>
+      <div className="mt-2 max-h-64 space-y-1 overflow-y-auto" aria-label="Work items available to link">{candidates.map((candidate) => { const candidateId = candidate.workItemId!; const isExisting = group?.relatedItems.some((relatedItem) => relatedItem.id === candidateId) ?? false; const isSelected = selectedIds.includes(candidateId); return <label key={candidateId} className={`flex cursor-pointer items-start gap-3 rounded-xl px-3 py-2.5 ${isSelected ? "bg-white" : "hover:bg-white/70"}`}><input type="checkbox" checked={isSelected} disabled={isExisting} onChange={() => toggleCandidate(candidateId)} className="mt-0.5 size-4 accent-[var(--forest)]"/><span className="min-w-0"><span className="block truncate text-xs font-extrabold">{candidate.title}</span><span className="mt-1 block text-[10px] text-[var(--muted)]">{candidate.reportId} · {candidate.category} · {candidate.area}{isExisting ? " · already linked" : ""}</span></span></label>; })}</div>
+      {candidates.length === 0 ? <p className="mt-3 text-xs text-[var(--muted)]">No matching work items.</p> : null}
+      <div className="mt-3 flex justify-end"><button type="button" onClick={save} disabled={isSaving || !label.trim() || selectedIds.length === 0} className="min-h-10 rounded-xl bg-[var(--forest)] px-4 text-xs font-extrabold text-white disabled:opacity-40">{isSaving ? "Saving…" : "Save related work"}</button></div>
+    </div> : null}
+    {error ? <p role="alert" className="mt-3 rounded-xl bg-[#f8ddd7] px-3 py-2 text-xs font-bold text-[#8c3328]">{error}</p> : null}
   </section>;
 }
 
@@ -676,7 +780,7 @@ function TimelineView({ findings, calendarProperty, reviewStatuses, reviewActivi
   const safety = unscheduled.filter((item) => item.severity === "safety_hazard");
   const important = unscheduled.filter((item) => item.priority === "important" && item.severity !== "safety_hazard");
   const routine = unscheduled.filter((item) => item.priority === "routine" || item.priority === "informational");
-  return <><div className="enter"><PageHeading eyebrow="Plan by time" title="Maintenance timeline" description={scheduled.length ? "Scheduled work appears first. Open any scheduled item to add it to Google Calendar or download an .ics reminder." : "The initial report has no trusted due dates yet, so work is grouped by recommended review horizon."} /><div className="mt-8 max-w-4xl space-y-8">{scheduled.length ? <TimelineGroup label="Scheduled" note="Ready to add to your calendar" color="forest" items={scheduled} reviewStatuses={reviewStatuses} onOpen={setSelectedItem} /> : null}<TimelineGroup label="Verify first" note="Safety findings · review now" color="rose" items={safety} reviewStatuses={reviewStatuses} onOpen={setSelectedItem} /><TimelineGroup label="Plan next" note="Important recommendations · schedule after review" color="amber" items={important.slice(0, 8)} reviewStatuses={reviewStatuses} onOpen={setSelectedItem} /><TimelineGroup label="Routine & long-term" note="Maintenance, monitoring, and cosmetic work" color="forest" items={routine.slice(0, 8)} reviewStatuses={reviewStatuses} onOpen={setSelectedItem} /></div></div>{selectedItem ? <FindingReviewDialog item={selectedItem} calendarProperty={calendarProperty} status={reviewStatuses[selectedItem.reportId] ?? "needs_review"} activities={reviewActivities.filter((activity) => activity.reportId === selectedItem.reportId)} serviceRecords={serviceRecords.filter((record) => record.reportId === selectedItem.reportId)} initialStatus={null} onClose={() => setSelectedItem(null)} onRecordReview={(status, note) => onRecordReview(selectedItem.reportId, status, note)} onCompleteWork={(details) => onCompleteWork(selectedItem.reportId, details)} onAttachDocument={() => onAttachDocument(selectedItem)} /> : null}</>;
+  return <><div className="enter"><PageHeading eyebrow="Plan by time" title="Maintenance timeline" description={scheduled.length ? "Scheduled work appears first. Open any scheduled item to add it to Google Calendar or download an .ics reminder." : "The initial report has no trusted due dates yet, so work is grouped by recommended review horizon."} /><div className="mt-8 max-w-4xl space-y-8">{scheduled.length ? <TimelineGroup label="Scheduled" note="Ready to add to your calendar" color="forest" items={scheduled} reviewStatuses={reviewStatuses} onOpen={setSelectedItem} /> : null}<TimelineGroup label="Verify first" note="Safety findings · review now" color="rose" items={safety} reviewStatuses={reviewStatuses} onOpen={setSelectedItem} /><TimelineGroup label="Plan next" note="Important recommendations · schedule after review" color="amber" items={important.slice(0, 8)} reviewStatuses={reviewStatuses} onOpen={setSelectedItem} /><TimelineGroup label="Routine & long-term" note="Maintenance, monitoring, and cosmetic work" color="forest" items={routine.slice(0, 8)} reviewStatuses={reviewStatuses} onOpen={setSelectedItem} /></div></div>{selectedItem ? <FindingReviewDialog key={selectedItem.workItemId ?? selectedItem.reportId} item={selectedItem} findings={findings} calendarProperty={calendarProperty} status={reviewStatuses[selectedItem.reportId] ?? "needs_review"} activities={reviewActivities.filter((activity) => activity.reportId === selectedItem.reportId)} serviceRecords={serviceRecords.filter((record) => record.reportId === selectedItem.reportId)} initialStatus={null} onClose={() => setSelectedItem(null)} onOpenRelated={(workItemId) => { const relatedItem = findings.find((finding) => finding.workItemId === workItemId); if (relatedItem) setSelectedItem(relatedItem); }} onRecordReview={(status, note) => onRecordReview(selectedItem.reportId, status, note)} onCompleteWork={(details) => onCompleteWork(selectedItem.reportId, details)} onAttachDocument={() => onAttachDocument(selectedItem)} /> : null}</>;
 }
 
 function TimelineGroup({ label, note, color, items, reviewStatuses, onOpen }: { label: string; note: string; color: "rose" | "amber" | "forest"; items: Finding[]; reviewStatuses: Record<string, ReviewStatus>; onOpen: (item: Finding) => void }) {

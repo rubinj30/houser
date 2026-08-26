@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(52);
+select plan(62);
 
 insert into auth.users (
   instance_id, id, aud, role, email, encrypted_password,
@@ -32,6 +32,9 @@ values
   ('a1000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001', 'Property A'),
   ('b2000000-0000-0000-0000-000000000002', 'b0000000-0000-0000-0000-000000000002', 'Property B');
 
+insert into public.work_items (id, property_id, title, created_by)
+values ('b2100000-0000-0000-0000-000000000002', 'b2000000-0000-0000-0000-000000000002', 'Other account work', '20000000-0000-0000-0000-000000000002');
+
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}', true);
 
@@ -51,6 +54,33 @@ select throws_ok(
   '42501',
   null,
   'a user cannot create work in another account'
+);
+
+insert into public.work_items (id, property_id, title, created_by)
+values ('a1200000-0000-0000-0000-000000000001', 'a1000000-0000-0000-0000-000000000001', 'Related work', '10000000-0000-0000-0000-000000000001');
+
+select lives_ok(
+  $$ select public.set_related_work_group('a1100000-0000-0000-0000-000000000001', array['a1200000-0000-0000-0000-000000000001']::uuid[], 'Mason visit') $$,
+  'an owner can group work within their property'
+);
+
+select results_eq(
+  $$ select count(*)::bigint from public.work_item_groups $$,
+  array[1::bigint],
+  'an owner can read their related-work group'
+);
+
+select results_eq(
+  $$ select public.get_related_work_group('a1100000-0000-0000-0000-000000000001')->'group'->>'label' $$,
+  array['Mason visit'::text],
+  'related-work lookup returns the shared group label'
+);
+
+select throws_ok(
+  $$ select public.set_related_work_group('a1100000-0000-0000-0000-000000000001', array['b2100000-0000-0000-0000-000000000002']::uuid[], 'Cross-account work') $$,
+  'P0001',
+  null,
+  'an owner cannot group work from another property'
 );
 
 select lives_ok(
@@ -233,6 +263,32 @@ select results_eq(
   'another account cannot read document links'
 );
 
+select results_eq(
+  $$ select count(*)::bigint from public.work_item_groups $$,
+  array[0::bigint],
+  'another account cannot read related-work groups'
+);
+
+select results_eq(
+  $$ select count(*)::bigint from public.work_item_group_members $$,
+  array[0::bigint],
+  'another account cannot read related-work membership'
+);
+
+select throws_ok(
+  $$ select public.get_related_work_group('a1100000-0000-0000-0000-000000000001') $$,
+  'P0001',
+  null,
+  'another account cannot load the first account related work'
+);
+
+select throws_ok(
+  $$ select public.set_related_work_group('a1100000-0000-0000-0000-000000000001', array['a1200000-0000-0000-0000-000000000001']::uuid[], 'Forged group') $$,
+  'P0001',
+  null,
+  'another account cannot edit the first account related work'
+);
+
 select throws_ok(
   $$ select public.link_document_to_work_item('a3000000-0000-0000-0000-000000000003', 'a1100000-0000-0000-0000-000000000001') $$,
   'P0001',
@@ -366,6 +422,20 @@ select throws_ok(
   '42501',
   null,
   'anonymous requests cannot read property data'
+);
+
+select throws_ok(
+  $$ select * from public.work_item_groups $$,
+  '42501',
+  null,
+  'anonymous requests cannot read related-work groups'
+);
+
+select throws_ok(
+  $$ select * from public.work_item_group_members $$,
+  '42501',
+  null,
+  'anonymous requests cannot read related-work membership'
 );
 
 select * from finish();

@@ -1,0 +1,2 @@
+create index work_item_groups_created_by_idx on public.work_item_groups(created_by);
+create index work_item_group_members_added_by_idx on public.work_item_group_members(added_by);
