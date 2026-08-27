@@ -8,10 +8,11 @@ export const metadata = {
   description: "Manage the people and properties in your Houser household.",
 };
 
-export default async function HouseholdPage() {
+export default async function HouseholdPage({ searchParams }: { searchParams: Promise<{ addProperty?: string }> }) {
   const email = await getAuthenticatedEmail();
   if (!email) redirect("/");
+  const query = await searchParams;
   const household = await getHouseholdSettings();
   if (!household) redirect("/");
-  return <HouseholdSettingsView household={household} />;
+  return <HouseholdSettingsView household={household} initiallyAddingProperty={query.addProperty === "1"} />;
 }

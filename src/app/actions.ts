@@ -480,7 +480,7 @@ export async function getLinkedWorkDocumentsAction(input: { workItemId: string }
   if (error) throw new Error(error.message);
   return (data ?? []).flatMap((row) => {
     const related = Array.isArray(row.documents) ? row.documents[0] : row.documents;
-    if (!related || related.document_type === "inspection") return [];
+    if (!related || (related.document_type === "inspection" && row.relationship === "source")) return [];
     return [{
       id: related.id,
       documentType: related.document_type,

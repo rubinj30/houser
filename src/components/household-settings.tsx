@@ -30,14 +30,14 @@ function initials(name: string) {
   return name.split(/\s|@/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("");
 }
 
-export function HouseholdSettingsView({ household }: { household: HouseholdSettings }) {
+export function HouseholdSettingsView({ household, initiallyAddingProperty = false }: { household: HouseholdSettings; initiallyAddingProperty?: boolean }) {
   const isOwner = household.currentRole === "owner";
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<HouseholdRole>("contributor");
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-  const [isAddingProperty, setIsAddingProperty] = useState(false);
+  const [isAddingProperty, setIsAddingProperty] = useState(initiallyAddingProperty);
   const [propertyName, setPropertyName] = useState("");
   const [propertyType, setPropertyType] = useState<"primary_residence" | "rental" | "vacation_home" | "other">("rental");
   const [addressLine1, setAddressLine1] = useState("");
