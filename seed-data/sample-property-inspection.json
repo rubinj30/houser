@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "property": {
+    "displayName": "Sample Home",
+    "kind": "primary_residence",
+    "address": {
+      "line1": "123 Example Street",
+      "city": "Atlanta",
+      "region": "GA",
+      "postalCode": "30300"
+    },
+    "timezone": "America/New_York"
+  },
+  "source": {
+    "type": "inspection",
+    "documentDate": "2026-01-15",
+    "originalFilename": "sample-inspection.pdf",
+    "pageCount": 12,
+    "generateFindingCaptures": false
+  },
+  "importPolicy": {
+    "defaultStatus": "inbox",
+    "needsVerification": true,
+    "manualReviewRequired": true
+  },
+  "areas": ["Exterior"],
+  "assets": [
+    {
+      "key": "sample-roof",
+      "name": "Sample roof",
+      "category": "Roof",
+      "area": "Exterior",
+      "assetType": "roof",
+      "sourcePages": [12]
+    }
+  ],
+  "findings": [
+    {
+      "reportId": "sample-1",
+      "title": "Review sample roof flashing",
+      "category": "Roof",
+      "area": "Exterior",
+      "assetKey": "sample-roof",
+      "workType": "inspect",
+      "severity": "recommendation",
+      "priority": "important",
+      "location": "Roof edge",
+      "suggestedAction": "Have a qualified professional inspect the flashing and document its condition.",
+      "sourcePages": [12]
+    }
+  ]
+}

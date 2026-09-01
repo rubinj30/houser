@@ -46,7 +46,7 @@ Use the Responses API with:
 - `store: false` when appropriate to the selected OpenAI data-handling configuration
 - A fixed model snapshot/version where reproducibility is more important than automatically adopting model updates
 
-The first fixture was extracted manually from the Example HVAC Vendor HVAC proposal and serves as the expected output for evaluating the API implementation.
+Use synthetic, privacy-safe fixtures as expected output when evaluating the API implementation.
 
 ## Proposed storage layout
 
@@ -68,13 +68,13 @@ Database tables:
 
 Signed URLs should be short-lived and generated only after verifying the user's property access.
 
-## Example HVAC Vendor proposal findings
+## Example HVAC proposal findings
 
-The June 13, 2025 proposal is a useful evaluation case because it includes:
+An HVAC proposal is a useful evaluation case when it includes:
 
-- A proposed main-level Carrier two-stage, 36,000 BTU R454B A/C system
-- Outdoor model `26TPA836W003` and indoor-coil model `CVAVA3617XMA`
-- A $9,000 total after $1,000 in discounts
+- A proposed multi-stage A/C system
+- Manufacturer and model information
+- A total with discounts
 - A 50% deposit and balance upon completion
 - Multiple warranty statements with different conditions
 - A promotion expiration date

@@ -1,23 +1,40 @@
 import { describe, expect, it } from "vitest";
-import inspectionSeed from "../../seed-data/sample-property-inspection.json";
 import { countBySeverity, filterFindings, formatSourcePages, groupByCategory, mergeFindings } from "./findings";
 import type { Finding } from "./types";
 
-const findings = inspectionSeed.findings as Finding[];
+const makeFinding = (overrides: Partial<Finding>): Finding => ({
+  reportId: "sample-1",
+  title: "Inspect sample component",
+  category: "Exterior",
+  area: "Outside",
+  workType: "Inspection",
+  severity: "recommendation",
+  priority: "important",
+  location: "Sample location",
+  suggestedAction: "Have a qualified professional inspect the component.",
+  sourcePages: [12],
+  ...overrides,
+});
 
-describe("Sample Home inspection fixture", () => {
-  it("matches the source summary counts", () => {
-    expect(findings).toHaveLength(51);
-    expect(countBySeverity(findings)).toEqual({ maintenance_item: 3, recommendation: 40, safety_hazard: 8 });
+const findings: Finding[] = [
+  makeFinding({ reportId: "sample-1", title: "Inspect chimney cap", location: "Roof chimney" }),
+  makeFinding({ reportId: "sample-2", title: "Seal chimney flashing", location: "Roof chimney", priority: "urgent", severity: "safety_hazard" }),
+  makeFinding({ reportId: "sample-3", title: "Add GFCI protection", category: "Electrical", area: "Garage", location: "Garage outlet", priority: "urgent", severity: "safety_hazard" }),
+  makeFinding({ reportId: "sample-4", title: "Clean gutters", category: "Roof", severity: "maintenance_item", priority: "routine" }),
+];
+
+describe("finding helpers", () => {
+  it("counts findings by severity", () => {
+    expect(countBySeverity(findings)).toEqual({ maintenance_item: 1, recommendation: 1, safety_hazard: 2 });
   });
 
   it("groups findings by category with safety counts", () => {
-    expect(groupByCategory(findings).find((item) => item.category === "Electrical")).toMatchObject({ count: 7, urgent: 3 });
+    expect(groupByCategory(findings).find((item) => item.category === "Electrical")).toMatchObject({ count: 1, urgent: 1 });
   });
 
   it("searches across location and action text", () => {
     expect(filterFindings(findings, { query: "chimney", severity: "all", category: "all" })).toHaveLength(2);
-    expect(filterFindings(findings, { query: "GFCI", severity: "all", category: "all" })[0]?.reportId).toBe("5.4.1");
+    expect(filterFindings(findings, { query: "GFCI", severity: "all", category: "all" })[0]?.reportId).toBe("sample-3");
   });
 
   it("formats single and multi-page evidence", () => {

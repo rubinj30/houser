@@ -4,7 +4,7 @@ Houser is a mobile-first home maintenance and work-history application for a pri
 
 ## Current POC
 
-The POC is live at [houser-flax.vercel.app](https://houser-flax.vercel.app). It uses Supabase authentication and persistence with real, privacy-reduced Sample Home inspection data. The responsive dashboard includes work, timeline, and asset views; database-backed quick capture; review notes and activity history; and a completed-work flow for service date, vendor, actual cost, warranty, and recurring maintenance.
+The POC is live at [houser-flax.vercel.app](https://houser-flax.vercel.app). It uses Supabase authentication and persistence. The responsive dashboard includes work, timeline, and asset views; database-backed quick capture; review notes and activity history; and a completed-work flow for service date, vendor, actual cost, warranty, and recurring maintenance.
 
 ```bash
 npm install
@@ -26,7 +26,6 @@ Planning documents:
 
 - [Product outline](docs/PRODUCT_OUTLINE.md)
 - [Technical specification](docs/TECH_SPEC.md)
-- [Sample Home inspection seed notes](docs/INSPECTION_SEED_NOTES.md)
 - [Document ingestion and normalization](docs/DOCUMENT_INGESTION.md)
 - [POC execution status](docs/POC_EXECUTION.md)
 
