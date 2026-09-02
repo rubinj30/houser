@@ -63,7 +63,6 @@ export type HouserChatAction = z.infer<typeof houserChatActionSchema>;
 export const houserChatResponseSchema = z.object({
   answer: z.string().min(1).max(8000),
   relatedWorkItemIds: z.array(z.string().uuid()).max(6),
-  suggestedQuestions: z.array(z.string().min(1).max(180)).max(3),
   confidence: z.enum(["high", "medium", "low"]),
   proposedAction: houserChatActionSchema.nullable(),
 });

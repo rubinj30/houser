@@ -63,7 +63,6 @@ export async function POST(request: Request) {
     return NextResponse.json({
       answer: answer.answer,
       confidence: answer.confidence,
-      suggestedQuestions: answer.suggestedQuestions,
       relatedWorkItems,
       proposedAction,
     });

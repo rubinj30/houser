@@ -60,7 +60,6 @@ describe("POST /api/chat", () => {
     mocks.parse.mockResolvedValue({ output_parsed: {
       answer: "The stored analysis says brown discoloration is visible beside the vent; it does not establish the cause.",
       confidence: "medium",
-      suggestedQuestions: [],
       relatedWorkItemIds: [workItemId],
       proposedAction: null,
     } });
@@ -93,7 +92,7 @@ describe("POST /api/chat", () => {
       targetEndOn: null,
       note: "Planned in chat.",
     };
-    mocks.parse.mockResolvedValue({ output_parsed: { answer: "I can update it.", confidence: "high", suggestedQuestions: [], relatedWorkItemIds: [], proposedAction } });
+    mocks.parse.mockResolvedValue({ output_parsed: { answer: "I can update it.", confidence: "high", relatedWorkItemIds: [], proposedAction } });
     const response = await POST(request("Mark the vent item planned"));
     await expect(response.json()).resolves.toMatchObject({ proposedAction });
   });
@@ -110,7 +109,7 @@ describe("POST /api/chat", () => {
       postalCode: "30303",
       timezone: "America/New_York",
     };
-    mocks.parse.mockResolvedValue({ output_parsed: { answer: "I can add that property after you confirm.", confidence: "high", suggestedQuestions: [], relatedWorkItemIds: [], proposedAction } });
+    mocks.parse.mockResolvedValue({ output_parsed: { answer: "I can add that property after you confirm.", confidence: "high", relatedWorkItemIds: [], proposedAction } });
     const response = await POST(request("Add my rental at 123 Oak Street in Atlanta"));
     await expect(response.json()).resolves.toMatchObject({ proposedAction });
   });
@@ -119,7 +118,6 @@ describe("POST /api/chat", () => {
     mocks.parse.mockResolvedValue({ output_parsed: {
       answer: "I can update it.",
       confidence: "high",
-      suggestedQuestions: [],
       relatedWorkItemIds: [],
       proposedAction: {
         type: "update_work_item",

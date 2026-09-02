@@ -19,8 +19,11 @@ Quality checks:
 npm run lint
 npm run typecheck
 npm test
+npm run test:e2e
 npm run build
 ```
+
+The Playwright suite runs the critical Work-planning paths at mobile and desktop sizes. Configure the optional `E2E_USER_EMAIL` and `E2E_USER_PASSWORD` values from `.env.example` with a disposable test household; authenticated tests skip when those credentials are absent.
 
 Planning documents:
 
@@ -29,4 +32,4 @@ Planning documents:
 - [Document ingestion and normalization](docs/DOCUMENT_INGESTION.md)
 - [POC execution status](docs/POC_EXECUTION.md)
 
-The current milestone is finishing the manual maintenance loop with asset editing and general work-item editing. Private document storage, extraction, and source-page captures follow after that loop is reliable.
+Work-item mutations now share one Work-planning module and an atomic database function across quick capture and Ask Houser. Private document storage, extraction, inspection evidence, attachments, household collaboration, and grounded chat are connected in the current POC.

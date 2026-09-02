@@ -8,7 +8,7 @@ import { z } from "zod";
 import { isHouserEmailAllowed } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import type { InspectionEvidence, InspectionSeed, LinkedWorkDocument, LocalWorkItem, ReviewActivity, ReviewStatus, WorkCompletionInput, WorkCompletionResult } from "@/lib/types";
-import { databaseStatusToReview, reviewStatusToDatabase } from "@/lib/work-status";
+import { completePlannedWorkItem, createManualWorkItem, linkDocumentToWorkItem, normalizeWorkCategory, normalizeWorkType, recordWorkItemReview } from "@/lib/work-planning";
 
 const reviewUpdateSchema = z.object({
   workItemId: z.uuid(),
@@ -63,34 +63,6 @@ const completionSchema = z.object({
 });
 
 const magicLinkSchema = z.object({ email: z.email() });
-
-const categoryAliases: Record<string, string> = {
-  HVAC: "HVAC and Ventilation",
-  Plumbing: "Plumbing and Water",
-  Interior: "Interior and Finishes",
-  "Structure and Water Management": "Structure and Foundation",
-  Garage: "General",
-};
-
-function systemCategoryName(name: string) {
-  return categoryAliases[name] ?? name;
-}
-
-function normalizeWorkType(value: string) {
-  if (value.includes("replace")) return "replace";
-  if (value.includes("repair")) return "repair";
-  if (value.includes("maintain")) return "maintain";
-  if (value.includes("improve")) return "improve";
-  if (value.includes("monitor")) return "monitor";
-  if (value.includes("inspect")) return "inspect";
-  return "other";
-}
-
-function currencyToMinor(value: string) {
-  if (!value) return null;
-  const [whole, fraction = ""] = value.split(".");
-  return Number(whole) * 100 + Number(fraction.padEnd(2, "0"));
-}
 
 async function requireUser() {
   const supabase = await createClient();
@@ -183,7 +155,7 @@ export async function bootstrapHouserAction() {
   const { error: assetsError } = await supabase.from("assets").upsert(
     seed.assets.map((asset) => ({
       property_id: propertyId,
-      category_id: categoryIds.get(systemCategoryName(asset.category)) ?? categoryIds.get("General") ?? null,
+      category_id: categoryIds.get(normalizeWorkCategory(asset.category)) ?? categoryIds.get("General") ?? null,
       area_id: areaIds.get(asset.area) ?? null,
       source_key: asset.key,
       source_page_numbers: asset.sourcePages,
@@ -205,7 +177,7 @@ export async function bootstrapHouserAction() {
   const { error: workError } = await supabase.from("work_items").upsert(
     seed.findings.map((finding) => ({
       property_id: propertyId,
-      category_id: categoryIds.get(systemCategoryName(finding.category)) ?? categoryIds.get("General") ?? null,
+      category_id: categoryIds.get(normalizeWorkCategory(finding.category)) ?? categoryIds.get("General") ?? null,
       area_id: areaIds.get(finding.area) ?? null,
       asset_id: finding.assetKey ? assetIds.get(finding.assetKey) ?? null : null,
       source_key: finding.reportId,
@@ -239,35 +211,9 @@ export async function recordReviewUpdateAction(input: {
 }): Promise<{ status: ReviewStatus; activity: ReviewActivity }> {
   const values = reviewUpdateSchema.parse(input);
   const { supabase } = await requireUser();
-  const databaseStatus = reviewStatusToDatabase[values.status];
-  const { error: updateError } = await supabase.rpc("record_work_item_review", {
-    target_work_item_id: values.workItemId,
-    next_status: databaseStatus,
-    review_note: values.note,
-  });
-  if (updateError) throw new Error(updateError.message);
-
-  const { data: event, error: eventError } = await supabase
-    .from("activity_events")
-    .select("id,status_to,note,created_at")
-    .eq("work_item_id", values.workItemId)
-    .eq("event_type", "status_change")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .single();
-  if (eventError) throw new Error(eventError.message);
-
+  const result = await recordWorkItemReview(supabase, values);
   revalidatePath("/");
-  return {
-    status: databaseStatusToReview(event.status_to),
-    activity: {
-      id: event.id,
-      reportId: values.reportId,
-      status: databaseStatusToReview(event.status_to),
-      note: event.note ?? "",
-      createdAt: event.created_at,
-    },
-  };
+  return result;
 }
 
 export async function getInspectionEvidenceAction(input: { workItemId: string }): Promise<InspectionEvidence | null> {
@@ -339,62 +285,9 @@ export async function getInspectionEvidenceAction(input: { workItemId: string })
 export async function completeWorkItemAction(input: WorkCompletionInput): Promise<WorkCompletionResult> {
   const values = completionSchema.parse(input);
   const { supabase } = await requireUser();
-  const { data: completion, error: completionError } = await supabase.rpc("complete_work_item", {
-    target_work_item_id: values.workItemId,
-    service_performed_on: values.performedOn,
-    service_vendor_name: values.vendorName || null,
-    service_cost_minor: currencyToMinor(values.cost),
-    service_note: values.note || null,
-    service_warranty_ends_on: values.warrantyEndsOn || null,
-    next_recurrence_months: values.recurrenceMonths,
-  });
-  if (completionError) throw new Error(completionError.message);
-
-  const result = completion as { service_record_id?: string; next_service_on?: string } | null;
-  if (!result?.service_record_id) throw new Error("The completion was saved without a service record identifier.");
-
-  const [{ data: serviceRecord, error: serviceError }, { data: event, error: eventError }] = await Promise.all([
-    supabase
-      .from("service_records")
-      .select("id,performed_on,description,vendor_name,cost_minor,currency,warranty_ends_on,recurrence_months,next_service_on")
-      .eq("id", result.service_record_id)
-      .single(),
-    supabase
-      .from("activity_events")
-      .select("id,status_to,note,created_at")
-      .eq("work_item_id", values.workItemId)
-      .eq("event_type", "service_recorded")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .single(),
-  ]);
-  if (serviceError) throw new Error(serviceError.message);
-  if (eventError) throw new Error(eventError.message);
-
+  const result = await completePlannedWorkItem(supabase, values);
   revalidatePath("/");
-  return {
-    status: "completed",
-    activity: {
-      id: event.id,
-      reportId: values.reportId,
-      status: databaseStatusToReview(event.status_to),
-      note: event.note ?? "",
-      createdAt: event.created_at,
-    },
-    serviceRecord: {
-      id: serviceRecord.id,
-      reportId: values.reportId,
-      performedOn: serviceRecord.performed_on,
-      description: serviceRecord.description,
-      vendorName: serviceRecord.vendor_name,
-      costMinor: serviceRecord.cost_minor === null ? null : Number(serviceRecord.cost_minor),
-      currency: serviceRecord.currency,
-      warrantyEndsOn: serviceRecord.warranty_ends_on,
-      recurrenceMonths: serviceRecord.recurrence_months,
-      nextServiceOn: serviceRecord.next_service_on,
-    },
-    nextServiceOn: serviceRecord.next_service_on,
-  };
+  return result;
 }
 
 export async function createManualWorkItemAction(input: {
@@ -405,68 +298,20 @@ export async function createManualWorkItemAction(input: {
   area: string;
 }): Promise<LocalWorkItem> {
   const values = manualWorkSchema.parse(input);
-  const { supabase, userId } = await requireUser();
-  const [{ data: category }, { data: area }] = await Promise.all([
-    supabase.from("categories").select("id,name").eq("name", systemCategoryName(values.category)).limit(1).maybeSingle(),
-    supabase.from("areas").select("id,name").eq("property_id", values.propertyId).eq("name", values.area).maybeSingle(),
-  ]);
-  const reportId = `manual-${crypto.randomUUID()}`;
-  const description = values.description || "Review this manually added work item and add scheduling details.";
-  const { data: workItem, error } = await supabase
-    .from("work_items")
-    .insert({
-      property_id: values.propertyId,
-      category_id: category?.id ?? null,
-      area_id: area?.id ?? null,
-      source_key: reportId,
-      title: values.title,
-      description,
-      work_type: "other",
-      status: "inbox",
-      priority: "routine",
-      source_type: "manual",
-      source_location: values.area,
-      created_by: userId,
-      updated_by: userId,
-    })
-    .select("id")
-    .single();
-  if (error) throw new Error(error.message);
-
+  const { supabase } = await requireUser();
+  const result = await createManualWorkItem(supabase, values);
   revalidatePath("/");
-  return {
-    workItemId: workItem.id,
-    reportId,
-    title: values.title,
-    category: values.category,
-    area: values.area,
-    workType: "other",
-    severity: "recommendation",
-    priority: "routine",
-    location: values.area,
-    suggestedAction: description,
-    sourcePages: [],
-    isLocal: true,
-  } satisfies LocalWorkItem;
+  return result satisfies LocalWorkItem;
 }
 
 export async function saveDocumentWorkDestinationAction(input: z.input<typeof documentWorkDestinationSchema>) {
   const values = documentWorkDestinationSchema.parse(input);
   const { supabase } = await requireUser();
-  const { data, error } = await supabase.rpc("link_document_to_work_item", {
-    target_document_id: values.documentId,
-    target_work_item_id: values.destination === "existing" ? values.existingWorkItemId : null,
-    new_title: values.destination === "new" ? values.title : null,
-    new_category_name: values.destination === "new" ? systemCategoryName(values.category) : null,
-    new_area_name: values.destination === "new" ? values.area : null,
-    new_description: values.destination === "new" ? values.description : null,
-    new_work_type: values.destination === "new" ? normalizeWorkType(values.workType) : "other",
-    new_estimated_cost_minor: values.destination === "new" ? values.estimatedCostMinor : null,
-    new_currency: values.destination === "new" ? values.currency : "USD",
-  });
-  if (error) throw new Error(error.message);
+  const result = await linkDocumentToWorkItem(supabase, values.destination === "existing"
+    ? { documentId: values.documentId, existingWorkItemId: values.existingWorkItemId }
+    : { documentId: values.documentId, newWork: values });
   revalidatePath("/");
-  return { workItemId: data as string };
+  return result;
 }
 
 export async function getLinkedWorkDocumentsAction(input: { workItemId: string }): Promise<LinkedWorkDocument[]> {

@@ -13,6 +13,7 @@ export function queryResult(data: unknown = null, error: SupabaseResult["error"]
     eq: vi.fn(),
     is: vi.fn(),
     gt: vi.fn(),
+    order: vi.fn(),
     limit: vi.fn(),
     insert: vi.fn(),
     update: vi.fn(),
@@ -21,7 +22,7 @@ export function queryResult(data: unknown = null, error: SupabaseResult["error"]
     maybeSingle: vi.fn(async () => result),
     single: vi.fn(async () => result),
   };
-  for (const method of ["select", "eq", "is", "gt", "limit", "insert", "update", "upsert", "delete"] as const) {
+  for (const method of ["select", "eq", "is", "gt", "order", "limit", "insert", "update", "upsert", "delete"] as const) {
     query[method].mockReturnValue(query);
   }
   return query;

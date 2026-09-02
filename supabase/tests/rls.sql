@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(64);
+select plan(68);
 
 insert into auth.users (
   instance_id, id, aud, role, email, encrypted_password,
@@ -59,6 +59,31 @@ select throws_ok(
 select lives_ok(
   $$ insert into public.work_items (id, property_id, title, created_by) values ('a1100000-0000-0000-0000-000000000001', 'a1000000-0000-0000-0000-000000000001', 'Allowed work', '10000000-0000-0000-0000-000000000001') $$,
   'an owner can create work in their property'
+);
+
+select lives_ok(
+  $$ select public.plan_work_item(
+    target_property_id => 'a1000000-0000-0000-0000-000000000001',
+    new_source_type => 'manual',
+    new_title => 'Atomic Work planning test',
+    new_description => 'Created through the shared Work planning boundary.',
+    new_category_name => 'General',
+    new_area_name => 'Test Area',
+    new_work_type => 'inspect',
+    new_status => 'inbox',
+    new_priority => 'routine',
+    activity_note => 'Created by the RLS test.'
+  ) $$,
+  'an owner can atomically plan work in their property'
+);
+
+select results_eq(
+  $$ select event_type || ':' || note
+     from public.activity_events event
+     join public.work_items item on item.id = event.work_item_id
+     where item.title = 'Atomic Work planning test' $$,
+  array['created:Created by the RLS test.'::text],
+  'Work planning writes the matching activity in the same operation'
 );
 
 select throws_ok(
@@ -288,6 +313,16 @@ select results_eq(
 );
 
 select throws_ok(
+  $$ select public.plan_work_item(
+    target_property_id => 'a1000000-0000-0000-0000-000000000001',
+    new_title => 'Cross-account planned work'
+  ) $$,
+  'P0001',
+  null,
+  'another account cannot plan work in the first account property'
+);
+
+select throws_ok(
   $$ select public.get_related_work_group('a1100000-0000-0000-0000-000000000001') $$,
   'P0001',
   null,
@@ -400,6 +435,16 @@ select throws_ok(
   '42501',
   null,
   'a viewer cannot create work'
+);
+
+select throws_ok(
+  $$ select public.plan_work_item(
+    target_property_id => 'a1000000-0000-0000-0000-000000000001',
+    new_title => 'Viewer-planned work'
+  ) $$,
+  'P0001',
+  null,
+  'a viewer cannot plan work through the security-definer function'
 );
 
 select set_config('request.jwt.claims', '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated","email":"owner-a@example.test"}', true);

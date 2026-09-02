@@ -22,7 +22,6 @@ describe("Ask Houser contracts", () => {
     expect(houserChatResponseSchema.parse({
       answer: "The A/C item is unscheduled.",
       relatedWorkItemIds: ["11111111-1111-4111-8111-111111111111"],
-      suggestedQuestions: ["What should I verify first?"],
       confidence: "high",
       proposedAction: null,
     }).confidence).toBe("high");
