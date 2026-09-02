@@ -1,14 +1,14 @@
 "use server";
 
-import inspectionSeed from "../../seed-data/sample-property-inspection.json";
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { isHouserEmailAllowed } from "@/lib/supabase/admin";
+import { createHouseholdProperty } from "@/lib/property-mutations";
 import { createClient } from "@/lib/supabase/server";
-import type { InspectionEvidence, InspectionSeed, LinkedWorkDocument, LocalWorkItem, ReviewActivity, ReviewStatus, WorkCompletionInput, WorkCompletionResult } from "@/lib/types";
-import { completePlannedWorkItem, createManualWorkItem, linkDocumentToWorkItem, normalizeWorkCategory, normalizeWorkType, recordWorkItemReview } from "@/lib/work-planning";
+import type { InspectionEvidence, LinkedWorkDocument, LocalWorkItem, ReviewActivity, ReviewStatus, WorkCompletionInput, WorkCompletionResult } from "@/lib/types";
+import { completePlannedWorkItem, createManualWorkItem, linkDocumentToWorkItem, recordWorkItemReview } from "@/lib/work-planning";
 
 const reviewUpdateSchema = z.object({
   workItemId: z.uuid(),
@@ -63,6 +63,10 @@ const completionSchema = z.object({
 });
 
 const magicLinkSchema = z.object({ email: z.email() });
+const initialWorkspaceSchema = z.object({
+  displayName: z.string().trim().min(1).max(120),
+  propertyType: z.enum(["primary_residence", "rental", "vacation_home", "other"]),
+});
 
 async function requireUser() {
   const supabase = await createClient();
@@ -104,103 +108,44 @@ export async function requestMagicLinkAction(input: { email: string }) {
   return { sent: true };
 }
 
-export async function bootstrapHouserAction() {
+export async function requestAccountCreationAction(input: { email: string }) {
+  const { email } = magicLinkSchema.parse(input);
+  const normalizedEmail = email.toLowerCase();
+  const requestHeaders = await headers();
+  const requestOrigin = requestHeaders.get("origin");
+  const configuredUrl = process.env.NEXT_PUBLIC_SITE_URL;
+  const siteUrl = configuredUrl ?? requestOrigin ?? "http://localhost:3000";
+  const supabase = await createClient();
+  const { error } = await supabase.auth.signInWithOtp({
+    email: normalizedEmail,
+    options: {
+      emailRedirectTo: `${siteUrl.replace(/\/$/, "")}/auth/confirm?next=${encodeURIComponent("/?welcome=1")}`,
+      shouldCreateUser: true,
+    },
+  });
+  if (error) throw new Error(error.message);
+  return { sent: true };
+}
+
+export async function createInitialWorkspaceAction(formData: FormData) {
+  const values = initialWorkspaceSchema.parse({
+    displayName: formData.get("displayName"),
+    propertyType: formData.get("propertyType"),
+  });
   const { supabase, userId } = await requireUser();
-  const seed = inspectionSeed as InspectionSeed;
-  const { data: accountId, error: bootstrapError } = await supabase.rpc("bootstrap_account", { account_name: "Houser" });
-  if (bootstrapError || !accountId) throw new Error(bootstrapError?.message ?? "Could not create the Houser account.");
-
-  const { data: existingProperty, error: propertyReadError } = await supabase
-    .from("properties")
-    .select("id")
-    .eq("account_id", accountId)
-    .eq("display_name", seed.property.displayName)
-    .maybeSingle();
-  if (propertyReadError) throw new Error(propertyReadError.message);
-
-  let propertyId = existingProperty?.id as string | undefined;
-  if (!propertyId) {
-    const { data: createdProperty, error: propertyError } = await supabase
-      .from("properties")
-      .insert({
-        account_id: accountId,
-        display_name: seed.property.displayName,
-        property_type: seed.property.kind,
-        address_line1: seed.property.address.line1,
-        city: seed.property.address.city,
-        region: seed.property.address.region,
-        postal_code: seed.property.address.postalCode,
-        timezone: seed.property.timezone,
-      })
-      .select("id")
-      .single();
-    if (propertyError) throw new Error(propertyError.message);
-    propertyId = createdProperty.id;
-  }
-
-  const { error: areasError } = await supabase
-    .from("areas")
-    .upsert(seed.areas.map((name) => ({ property_id: propertyId, name })), { onConflict: "property_id,name" });
-  if (areasError) throw new Error(areasError.message);
-
-  const [{ data: categories, error: categoriesError }, { data: areas, error: areaReadError }] = await Promise.all([
-    supabase.from("categories").select("id,name").is("account_id", null),
-    supabase.from("areas").select("id,name").eq("property_id", propertyId),
-  ]);
-  if (categoriesError) throw new Error(categoriesError.message);
-  if (areaReadError) throw new Error(areaReadError.message);
-  const categoryIds = new Map((categories ?? []).map((category) => [category.name, category.id]));
-  const areaIds = new Map((areas ?? []).map((area) => [area.name, area.id]));
-
-  const { error: assetsError } = await supabase.from("assets").upsert(
-    seed.assets.map((asset) => ({
-      property_id: propertyId,
-      category_id: categoryIds.get(normalizeWorkCategory(asset.category)) ?? categoryIds.get("General") ?? null,
-      area_id: areaIds.get(asset.area) ?? null,
-      source_key: asset.key,
-      source_page_numbers: asset.sourcePages,
-      name: asset.name,
-      asset_type: asset.assetType,
-      notes: asset.manufacturedYear ? `Manufactured ${asset.manufacturedYear} per inspection report.` : null,
-    })),
-    { onConflict: "property_id,source_key" },
-  );
-  if (assetsError) throw new Error(assetsError.message);
-
-  const { data: assets, error: assetReadError } = await supabase
-    .from("assets")
-    .select("id,source_key")
-    .eq("property_id", propertyId);
-  if (assetReadError) throw new Error(assetReadError.message);
-  const assetIds = new Map((assets ?? []).flatMap((asset) => asset.source_key ? [[asset.source_key, asset.id] as const] : []));
-
-  const { error: workError } = await supabase.from("work_items").upsert(
-    seed.findings.map((finding) => ({
-      property_id: propertyId,
-      category_id: categoryIds.get(normalizeWorkCategory(finding.category)) ?? categoryIds.get("General") ?? null,
-      area_id: areaIds.get(finding.area) ?? null,
-      asset_id: finding.assetKey ? assetIds.get(finding.assetKey) ?? null : null,
-      source_key: finding.reportId,
-      title: finding.title,
-      description: finding.suggestedAction,
-      work_type: normalizeWorkType(finding.workType),
-      status: "inbox",
-      priority: finding.priority,
-      safety_flags: finding.severity === "safety_hazard" ? ["life_safety"] : [],
-      source_type: "inspection",
-      source_location: finding.location,
-      source_page_numbers: finding.sourcePages,
-      source_document_name: seed.source.originalFilename,
-      source_document_date: seed.source.documentDate,
-      created_by: userId,
-      updated_by: userId,
-    })),
-    { onConflict: "property_id,source_key", ignoreDuplicates: true },
-  );
-  if (workError) throw new Error(workError.message);
-
+  const { error: bootstrapError } = await supabase.rpc("bootstrap_account", { account_name: "Houser" });
+  if (bootstrapError) throw new Error(bootstrapError.message);
+  await createHouseholdProperty(supabase, userId, {
+    displayName: values.displayName,
+    propertyType: values.propertyType,
+    addressLine1: null,
+    city: null,
+    region: null,
+    postalCode: null,
+    timezone: "America/New_York",
+  });
   revalidatePath("/");
-  redirect("/");
+  redirect("/?welcome=1");
 }
 
 export async function recordReviewUpdateAction(input: {

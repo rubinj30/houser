@@ -309,11 +309,11 @@ function HomeView({ seed, findings, hasInspectionDocument, canAdd, onOpenWork, o
           <div className="grid min-h-[260px] gap-6 p-6 sm:grid-cols-[1fr_auto] sm:p-8">
             <div className="flex flex-col justify-between">
               <div>
-                <div className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-[0.14em] text-[var(--lime)]"><FileText className="size-4" /> Inspection ready</div>
-                <h2 className="font-display mt-4 max-w-lg text-2xl font-extrabold leading-tight tracking-[-0.04em] sm:text-3xl">Turn the Sample Home report into your working plan.</h2>
-                <p className="mt-3 max-w-xl text-sm leading-6 text-white/65">Every finding keeps its page reference. Review what is still relevant, attach report captures, and record anything already completed.</p>
+                <div className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-[0.14em] text-[var(--lime)]"><FileText className="size-4" /> Recommended first step</div>
+                <h2 className="font-display mt-4 max-w-lg text-2xl font-extrabold leading-tight tracking-[-0.04em] sm:text-3xl">Upload your home inspection to build the first working plan.</h2>
+                <p className="mt-3 max-w-xl text-sm leading-6 text-white/65">Houser extracts findings for your review while preserving the original report and page references. Nothing becomes active work until you confirm it.</p>
               </div>
-              <div className="mt-6 flex flex-wrap gap-2"><button type="button" onClick={() => onOpenWork()} className="flex min-h-11 w-fit items-center gap-2 rounded-xl bg-[var(--lime)] px-4 text-sm font-extrabold text-[var(--forest-dark)] transition hover:brightness-105">Start review <ArrowRight className="size-4" /></button><button type="button" onClick={onUpload} className="flex min-h-11 items-center gap-2 rounded-xl border border-white/20 px-4 text-sm font-extrabold text-white hover:bg-white/10"><Upload className="size-4" /> Upload document</button></div>
+              <div className="mt-6 flex flex-wrap gap-2"><button type="button" onClick={onUpload} className="flex min-h-11 w-fit items-center gap-2 rounded-xl bg-[var(--lime)] px-4 text-sm font-extrabold text-[var(--forest-dark)] transition hover:brightness-105"><Upload className="size-4" /> Upload inspection</button><button type="button" onClick={() => onOpenWork()} className="flex min-h-11 items-center gap-2 rounded-xl border border-white/20 px-4 text-sm font-extrabold text-white hover:bg-white/10">Add work manually <ArrowRight className="size-4" /></button></div>
             </div>
             <ReportIllustration />
           </div>

@@ -2,14 +2,16 @@ import type { EmailOtpType } from "@supabase/supabase-js";
 import { type NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
-function safeNext(value: string | null) {
-  return value?.startsWith("/") && !value.startsWith("//") ? value : "/";
+function safeNext(value: string | null, origin: string) {
+  const path = value?.startsWith("/") && !value.startsWith("//") ? value : "/";
+  return new URL(path, origin);
 }
 
 export async function GET(request: NextRequest) {
   const redirectTo = request.nextUrl.clone();
-  redirectTo.pathname = safeNext(request.nextUrl.searchParams.get("next"));
-  redirectTo.search = "";
+  const next = safeNext(request.nextUrl.searchParams.get("next"), request.nextUrl.origin);
+  redirectTo.pathname = next.pathname;
+  redirectTo.search = next.search;
   const supabase = await createClient();
   const code = request.nextUrl.searchParams.get("code");
   const tokenHash = request.nextUrl.searchParams.get("token_hash");
