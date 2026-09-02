@@ -36,12 +36,13 @@ export function normalizeWorkCategory(name: string) {
 }
 
 export function normalizeWorkType(value: string) {
-  if (value.includes("replace")) return "replace";
-  if (value.includes("repair")) return "repair";
-  if (value.includes("maintain")) return "maintain";
-  if (value.includes("improve")) return "improve";
-  if (value.includes("monitor")) return "monitor";
-  if (value.includes("inspect")) return "inspect";
+  const normalized = value.toLowerCase();
+  if (normalized.includes("replace")) return "replace";
+  if (normalized.includes("repair")) return "repair";
+  if (normalized.includes("maintain")) return "maintain";
+  if (normalized.includes("improve")) return "improve";
+  if (normalized.includes("monitor")) return "monitor";
+  if (normalized.includes("inspect")) return "inspect";
   return "other";
 }
 

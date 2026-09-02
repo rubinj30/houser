@@ -62,7 +62,7 @@ const completionSchema = z.object({
   }
 });
 
-const magicLinkSchema = z.object({ email: z.email() });
+const magicLinkSchema = z.object({ email: z.string().trim().pipe(z.email()) });
 const initialWorkspaceSchema = z.object({
   displayName: z.string().trim().min(1).max(120),
   propertyType: z.enum(["primary_residence", "rental", "vacation_home", "other"]),

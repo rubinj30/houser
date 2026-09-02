@@ -6,6 +6,7 @@ import {
   createManualWorkItem,
   linkDocumentToWorkItem,
   normalizeWorkCategory,
+  normalizeWorkType,
   recordWorkItemReview,
   updateChatWorkItem,
 } from "./work-planning";
@@ -37,6 +38,8 @@ describe("Work planning", () => {
   it("owns the shared category vocabulary", () => {
     expect(normalizeWorkCategory("HVAC")).toBe("HVAC and Ventilation");
     expect(normalizeWorkCategory("Roof and Drainage")).toBe("Roof and Drainage");
+    expect(normalizeWorkType("Replace the condenser")).toBe("replace");
+    expect(normalizeWorkType("Monitor annually")).toBe("monitor");
   });
 
   it("creates quick-capture Work through the atomic planning interface", async () => {

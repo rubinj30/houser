@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(68);
+select plan(71);
 
 insert into auth.users (
   instance_id, id, aud, role, email, encrypted_password,
@@ -84,6 +84,38 @@ select results_eq(
      where item.title = 'Atomic Work planning test' $$,
   array['created:Created by the RLS test.'::text],
   'Work planning writes the matching activity in the same operation'
+);
+
+select lives_ok(
+  $$ select public.plan_work_item(
+    target_work_item_id => (select id from public.work_items where title = 'Atomic Work planning test'),
+    expected_updated_at => (select updated_at from public.work_items where title = 'Atomic Work planning test'),
+    new_source_type => 'chat',
+    new_status => 'planned',
+    activity_note => 'Planned after owner confirmation.'
+  ) $$,
+  'an owner can atomically update work using its concurrency token'
+);
+
+select results_eq(
+  $$ select event_type || ':' || status_from || ':' || status_to
+     from public.activity_events event
+     join public.work_items item on item.id = event.work_item_id
+     where item.title = 'Atomic Work planning test'
+     order by event.created_at desc limit 1 $$,
+  array['status_change:inbox:planned'::text],
+  'Work planning records the confirmed status transition'
+);
+
+select throws_ok(
+  $$ select public.plan_work_item(
+    target_work_item_id => (select id from public.work_items where title = 'Atomic Work planning test'),
+    expected_updated_at => '2000-01-01T00:00:00Z'::timestamptz,
+    new_status => 'completed'
+  ) $$,
+  'P0001',
+  null,
+  'Work planning rejects a stale chat proposal'
 );
 
 select throws_ok(

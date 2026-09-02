@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "test:e2e:public": "playwright test --project=public-mobile",
     "test:e2e:headed": "playwright test --headed"
   },
   "dependencies": {
