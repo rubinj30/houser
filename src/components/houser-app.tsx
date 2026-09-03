@@ -42,12 +42,9 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { completeWorkItemAction, createManualWorkItemAction, getInspectionEvidenceAction, getLinkedWorkDocumentsAction, recordReviewUpdateAction, saveDocumentWorkDestinationAction, signOutAction } from "@/app/actions";
-import { createClient as createBrowserClient } from "@/lib/supabase/client";
+import { completeWorkItemAction, createManualWorkItemAction, getInspectionEvidenceAction, getLinkedWorkDocumentsAction, recordReviewUpdateAction, signOutAction } from "@/app/actions";
+import { DocumentUploadDialog } from "@/components/work-intake/document-upload-dialog";
 import { buildGoogleCalendarUrl, buildIcsCalendar, calendarFilename, type CalendarProperty } from "@/lib/calendar";
-import type { NormalizedDocument } from "@/lib/document-extraction";
-import type { InspectionExtraction } from "@/lib/inspection-extraction";
-import type { PhotoExtraction } from "@/lib/photo-extraction";
 import {
   countBySeverity,
   filterFindings,
@@ -796,274 +793,6 @@ function AssetsView({ seed }: { seed: InspectionSeed }) {
   return <div className="enter"><PageHeading eyebrow="What the house contains" title="Assets & systems" description={`${seed.assets.length} assets were identified from the inspection report. Verify model and installation details as you review them.`} /><div className="mt-7 grid gap-4 lg:grid-cols-2">{grouped.map(([category, assets]) => { const Icon = iconByCategory[category] ?? HardHat; return <section key={category} className="rounded-[24px] border border-black/6 bg-[var(--paper)] p-5 surface-shadow"><div className="flex items-center gap-3"><div className="grid size-10 place-items-center rounded-[14px] bg-[var(--mint)] text-[var(--forest)]"><Icon className="size-[19px]"/></div><div><h2 className="font-display text-base font-extrabold">{category}</h2><p className="text-xs text-[var(--muted)]">{assets.length} {assets.length === 1 ? "asset" : "assets"}</p></div></div><div className="mt-4 divide-y divide-black/6">{assets.map((asset) => <div key={asset.key} className="flex items-center justify-between gap-3 py-3"><div><h3 className="text-sm font-bold">{asset.name}</h3><p className="mt-0.5 text-xs text-[var(--muted)]">{asset.area}{asset.manufacturedYear ? ` · ${asset.manufacturedYear}` : asset.installedYear ? ` · Installed ~${asset.installedYear}` : ""}</p></div><button type="button" className="grid size-9 place-items-center rounded-xl text-[var(--muted)] hover:bg-black/5" aria-label={`View ${asset.name}`}><ArrowRight className="size-4"/></button></div>)}</div></section>; })}</div></div>;
 }
 
-function PageHeading({ eyebrow, title, description }: { eyebrow: string; title: string; description: string }) {
-  return <header><p className="text-xs font-extrabold uppercase tracking-[0.14em] text-[var(--forest)]">{eyebrow}</p><h1 className="font-display mt-2 text-3xl font-extrabold tracking-[-0.05em] sm:text-4xl">{title}</h1><p className="mt-3 max-w-2xl text-sm leading-6 text-[var(--muted)] sm:text-base">{description}</p></header>;
-}
-
-function MobileNav({ activeView, onChangeView, canAdd, onAdd }: { activeView: View; onChangeView: (view: View) => void; canAdd: boolean; onAdd: () => void }) {
-  return <nav className="relative z-40 grid min-h-[72px] grid-cols-5 border-t border-black/8 bg-[var(--paper)] px-2 pb-[max(8px,env(safe-area-inset-bottom))] pt-2 lg:hidden" aria-label="Mobile navigation">{navItems.slice(0, 2).map((item) => <MobileNavButton key={item.id} item={item} active={activeView === item.id} onClick={() => onChangeView(item.id)} />)}<button type="button" onClick={onAdd} disabled={!canAdd} className="mx-auto -mt-7 grid size-14 place-items-center rounded-[20px] bg-[var(--forest)] text-white shadow-xl shadow-[#214f3e]/25 disabled:cursor-not-allowed disabled:bg-[var(--muted)] disabled:opacity-55" aria-label={canAdd ? "Add work" : "Choose a property to add work"}><Plus className="size-6"/></button>{navItems.slice(2).map((item) => <MobileNavButton key={item.id} item={item} active={activeView === item.id} onClick={() => onChangeView(item.id)} />)}</nav>;
-}
-
-function MobileNavButton({ item, active, onClick }: { item: (typeof navItems)[number]; active: boolean; onClick: () => void }) {
-  const Icon = item.icon;
-  return <button type="button" onClick={onClick} className={`flex min-h-12 flex-col items-center justify-center gap-1 text-[10px] font-extrabold ${active ? "text-[var(--forest)]" : "text-[var(--muted)]"}`} aria-current={active ? "page" : undefined}><Icon className="size-5" strokeWidth={active ? 2.5 : 1.9}/>{item.label}</button>;
-}
-
-type UploadPhase = "select" | "uploading" | "analyzing" | "review" | "importing";
-type DocumentUploadType = "inspection" | "quote" | "invoice" | "receipt" | "photo";
-type UploadDestination = "new" | "existing";
-type DocumentUploadResult =
-  | (InspectionExtraction & { documentType: "inspection"; documentId: string; runId: string })
-  | { documentType: "quote" | "invoice" | "receipt"; documentId: string; runId: string; normalized: NormalizedDocument }
-  | { documentType: "photo"; documentId: string; runId: string; analysis: PhotoExtraction };
-
-const documentTypeLabels: Record<DocumentUploadType, string> = {
-  inspection: "Inspection report",
-  quote: "Quote",
-  invoice: "Invoice",
-  receipt: "Receipt",
-  photo: "Photo or screenshot",
-};
-
-function DocumentUploadDialog({ propertyId, seed, findings, initialWorkItem, onClose }: { propertyId: string; seed: InspectionSeed; findings: Finding[]; initialWorkItem: Finding | null; onClose: () => void }) {
-  const [documentType, setDocumentType] = useState<DocumentUploadType>(initialWorkItem ? "quote" : "inspection");
-  const [destination, setDestination] = useState<UploadDestination>(initialWorkItem ? "existing" : "new");
-  const [selectedWorkItemId, setSelectedWorkItemId] = useState<string | null>(initialWorkItem?.workItemId ?? null);
-  const [searchQuery, setSearchQuery] = useState(initialWorkItem?.title ?? "");
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [file, setFile] = useState<File | null>(null);
-  const [phase, setPhase] = useState<UploadPhase>("select");
-  const [result, setResult] = useState<DocumentUploadResult | null>(null);
-  const [replaceExisting, setReplaceExisting] = useState(true);
-  const [error, setError] = useState("");
-  const matchingFindings = useMemo(() => {
-    return filterFindings(findings, { query: searchQuery, severity: "all", category: "all" })
-      .filter((item): item is Finding & { workItemId: string } => Boolean(item.workItemId))
-      .slice(0, 8);
-  }, [findings, searchQuery]);
-  const selectedUploadWorkItem = initialWorkItem ?? findings.find((item) => item.workItemId === selectedWorkItemId) ?? null;
-
-  const uploadAndAnalyze = async () => {
-    if (!file) return;
-    setError("");
-    const isPhoto = documentType === "photo";
-    const supportedImage = ["image/jpeg", "image/png", "image/webp", "image/gif"].includes(file.type);
-    if ((isPhoto ? !supportedImage : file.type !== "application/pdf") || file.size > 52_428_800) {
-      setError(isPhoto ? "Choose a JPEG, PNG, WebP, or GIF image smaller than 50 MB." : "Choose a PDF smaller than 50 MB.");
-      return;
-    }
-    const signature = isPhoto ? "" : new TextDecoder().decode(await file.slice(0, 5).arrayBuffer());
-    if (!isPhoto && signature !== "%PDF-") {
-      setError("This file does not appear to be a valid PDF.");
-      return;
-    }
-
-    try {
-      setPhase("uploading");
-      const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
-      const sha256 = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-      const intentResponse = await fetch("/api/documents/upload-intent", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ propertyId, documentType, filename: file.name, mimeType: file.type, byteSize: file.size, sha256 }),
-      });
-      const intent = await intentResponse.json();
-      if (!intentResponse.ok) throw new Error(intent.error ?? "Could not prepare the upload.");
-
-      const supabase = createBrowserClient();
-      const { error: uploadError } = await supabase.storage.from("documents").uploadToSignedUrl(intent.storageKey, intent.token, file, { contentType: file.type });
-      if (uploadError) throw uploadError;
-
-      setPhase("analyzing");
-      const processResponse = await fetch(`/api/documents/${intent.documentId}/process`, { method: "POST" });
-      const processed = await processResponse.json();
-      if (!processResponse.ok) throw new Error(processed.error ?? "The document could not be analyzed.");
-      setResult(processed as DocumentUploadResult);
-      setPhase("review");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "The document could not be uploaded.");
-      setPhase("select");
-    }
-  };
-
-  const importFindings = async () => {
-    if (!result || result.documentType !== "inspection") return;
-    setError("");
-    setPhase("importing");
-    try {
-      const response = await fetch(`/api/documents/${result.documentId}/import`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ runId: result.runId, replaceExisting, preserveSection: replaceExisting ? "10.4.1" : null }),
-      });
-      const imported = await response.json();
-      if (!response.ok) throw new Error(imported.error ?? "The findings could not be imported.");
-      window.location.reload();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "The findings could not be imported.");
-      setPhase("review");
-    }
-  };
-
-  const attachInspection = async () => {
-    if (!result || result.documentType !== "inspection" || !selectedWorkItemId) return;
-    setError("");
-    setPhase("importing");
-    try {
-      await saveDocumentWorkDestinationAction({
-        documentId: result.documentId,
-        destination: "existing",
-        existingWorkItemId: selectedWorkItemId,
-      });
-      window.location.reload();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "The inspection could not be attached.");
-      setPhase("review");
-    }
-  };
-
-  const busy = phase === "uploading" || phase === "analyzing" || phase === "importing";
-  const selectedLabel = documentTypeLabels[documentType];
-  return <div className="fixed inset-0 z-[60] grid items-end bg-[#0d1e17]/45 p-0 backdrop-blur-sm sm:place-items-center sm:p-6" role="presentation" onMouseDown={(event) => { if (!busy && event.currentTarget === event.target) onClose(); }}><section role="dialog" aria-modal="true" aria-labelledby="document-upload-title" className="max-h-[94dvh] w-full overflow-y-auto rounded-t-[28px] bg-[var(--paper)] p-5 shadow-2xl sm:max-w-xl sm:rounded-[28px] sm:p-7"><div className="flex items-start justify-between gap-4"><div><p className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-[var(--forest)]">Private attachment import</p><h2 id="document-upload-title" className="font-display mt-1 text-2xl font-extrabold tracking-tight">{initialWorkItem ? "Attach a file" : "Upload a file"}</h2><p className="mt-2 text-sm leading-6 text-[var(--muted)]">Houser privately stores the original file and uses OpenAI to extract searchable details for your review and chat.</p>{initialWorkItem ? <p className="mt-3 rounded-xl bg-[var(--mint)]/55 px-3 py-2 text-xs font-bold text-[var(--forest)]">Attaching to: {initialWorkItem.title}</p> : null}</div><button type="button" onClick={onClose} disabled={busy} className="grid size-10 shrink-0 place-items-center rounded-xl bg-black/5 disabled:opacity-40" aria-label="Close"><X className="size-5"/></button></div>
-    {phase === "select" ? <div className="mt-6 space-y-5">
-      {!initialWorkItem ? <section aria-labelledby="upload-destination-label">
-        <p id="upload-destination-label" className="text-xs font-extrabold">Where should this file go?</p>
-        <div className="mt-2 grid gap-2 sm:grid-cols-2">
-          <button type="button" aria-pressed={destination === "new"} onClick={() => { setDestination("new"); setSearchOpen(false); }} className={`min-h-14 rounded-xl px-4 text-left text-sm font-extrabold transition ${destination === "new" ? "bg-[var(--forest)] text-white" : "border border-black/10 bg-white hover:border-[var(--forest)]/25"}`}><span className="block">Create work from file</span><span className={`mt-1 block text-[10px] font-medium ${destination === "new" ? "text-white/70" : "text-[var(--muted)]"}`}>{documentType === "inspection" ? "Import proposed findings" : "Review a proposed work item"}</span></button>
-          <button type="button" aria-pressed={destination === "existing"} onClick={() => setDestination("existing")} className={`min-h-14 rounded-xl px-4 text-left text-sm font-extrabold transition ${destination === "existing" ? "bg-[var(--forest)] text-white" : "border border-black/10 bg-white hover:border-[var(--forest)]/25"}`}><span className="block">Attach to existing work</span><span className={`mt-1 block text-[10px] font-medium ${destination === "existing" ? "text-white/70" : "text-[var(--muted)]"}`}>Keep it with an item already tracked</span></button>
-        </div>
-        {destination === "existing" ? <div className="relative mt-3 rounded-[18px] border border-black/7 bg-white/55 p-4"><label className="block"><span className="text-xs font-extrabold">Find an existing work item</span><div className="relative mt-2"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--muted)]"/><input role="combobox" aria-autocomplete="list" aria-expanded={searchOpen} aria-controls="upload-work-options" value={searchQuery} onFocus={() => setSearchOpen(true)} onChange={(event) => { setSearchQuery(event.target.value); setSelectedWorkItemId(null); setSearchOpen(true); }} placeholder="Search by title, category, or area" className="h-11 w-full rounded-xl border border-black/10 bg-white pl-10 pr-3 text-sm"/></div></label>{searchOpen ? <div id="upload-work-options" role="listbox" className="mt-2 max-h-48 overflow-y-auto rounded-xl border border-black/8 bg-white p-1 shadow-lg">{matchingFindings.length ? matchingFindings.map((item) => <button key={item.workItemId} type="button" role="option" aria-selected={selectedWorkItemId === item.workItemId} onClick={() => { setSelectedWorkItemId(item.workItemId); setSearchQuery(item.title); setSearchOpen(false); }} className="w-full rounded-lg px-3 py-2.5 text-left hover:bg-[var(--mint)]"><span className="block text-xs font-extrabold">{item.title}</span><span className="mt-1 block text-[10px] text-[var(--muted)]">{item.category} · {item.area}</span></button>) : <p className="px-3 py-4 text-center text-xs text-[var(--muted)]">No matching work items</p>}</div> : null}{selectedWorkItemId && !searchOpen ? <p className="mt-2 flex items-center gap-1.5 text-xs font-extrabold text-[var(--forest)]"><CheckCircle2 className="size-4"/> Selected work item</p> : null}</div> : null}
-        <Link href="/household?addProperty=1#add-property-form" className="mt-3 flex min-h-11 items-center justify-between gap-3 rounded-xl px-3 text-xs font-extrabold text-[var(--forest)] transition hover:bg-[var(--mint)]/35 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--forest)]"><span className="flex items-center gap-2"><Home className="size-4"/>This file belongs to a new property</span><span className="flex items-center gap-1">Add property <ArrowRight className="size-3.5"/></span></Link>
-      </section> : null}
-      <label className="block"><span className="text-xs font-extrabold">Attachment type</span><div className="relative mt-2"><select value={documentType} onChange={(event) => { setDocumentType(event.target.value as DocumentUploadType); setFile(null); setError(""); }} className="h-12 w-full appearance-none rounded-xl border border-black/10 bg-white px-4 pr-10 text-sm font-bold">{initialWorkItem ? null : <option value="inspection">Inspection report</option>}<option value="quote">Quote</option><option value="invoice">Invoice</option><option value="receipt">Receipt</option><option value="photo">Photo or screenshot</option></select><ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-[var(--muted)]"/></div></label>
-      <label className="flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-[20px] border border-dashed border-[var(--forest)]/25 bg-white/55 p-5 text-center"><Upload className="size-7 text-[var(--forest)]"/><span className="mt-3 text-sm font-extrabold">Choose {selectedLabel.toLowerCase()}</span><span className="mt-1 max-w-sm text-xs leading-5 text-[var(--muted)]">{documentType === "photo" ? "JPEG, PNG, WebP, or GIF" : "PDF"} · up to 50 MB · visible only to household members</span><input type="file" accept={documentType === "photo" ? "image/jpeg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif" : "application/pdf,.pdf"} className="sr-only" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /></label>
-      {file ? <div className="flex items-center justify-between gap-3 rounded-xl bg-[var(--mint)]/45 px-4 py-3"><div className="min-w-0"><p className="truncate text-xs font-extrabold">{file.name}</p><p className="mt-0.5 text-[10px] text-[var(--muted)]">{selectedLabel} · {(file.size / 1_048_576).toFixed(1)} MB</p></div><CheckCircle2 className="size-5 shrink-0 text-[var(--forest)]"/></div> : null}
-      <button type="button" onClick={uploadAndAnalyze} disabled={!file || (destination === "existing" && !selectedWorkItemId)} className="min-h-12 w-full rounded-xl bg-[var(--forest)] text-sm font-extrabold text-white disabled:opacity-40">Upload & analyze with OpenAI</button>
-    </div> : null}
-    {phase === "uploading" || phase === "analyzing" ? <div className="mt-8 rounded-[20px] bg-[var(--mint)]/45 p-6 text-center"><Sparkles className="mx-auto size-7 animate-pulse text-[var(--forest)]"/><h3 className="mt-3 text-sm font-extrabold">{phase === "uploading" ? "Uploading privately…" : `Reading the ${selectedLabel.toLowerCase()}…`}</h3><p className="mt-2 text-xs leading-5 text-[var(--muted)]">{phase === "uploading" ? "The original PDF is going into private document storage." : "OpenAI is extracting structured details and page evidence. Keep this window open."}</p></div> : null}
-    {phase === "review" && result?.documentType === "inspection" ? <InspectionUploadReview result={result} destination={destination} existingWorkItem={selectedUploadWorkItem} replaceExisting={replaceExisting} onReplaceExisting={setReplaceExisting} onClose={onClose} onImport={importFindings} onAttach={attachInspection} /> : null}
-    {phase === "review" && result && ["quote", "invoice", "receipt"].includes(result.documentType) ? <FinancialDocumentUploadReview result={result as Extract<DocumentUploadResult, { documentType: "quote" | "invoice" | "receipt" }>} findings={findings} categories={[...new Set(seed.findings.map((item) => item.category))].sort()} areas={seed.areas} initialWorkItem={destination === "existing" ? selectedUploadWorkItem : null} onClose={onClose} /> : null}
-    {phase === "review" && result?.documentType === "photo" ? <PhotoUploadReview result={result} findings={findings} categories={[...new Set(seed.findings.map((item) => item.category))].sort()} areas={seed.areas} initialWorkItem={destination === "existing" ? selectedUploadWorkItem : null} onClose={onClose} /> : null}
-    {phase === "importing" ? <div className="mt-8 rounded-[20px] bg-[var(--mint)]/45 p-6 text-center"><Sparkles className="mx-auto size-7 animate-pulse text-[var(--forest)]"/><h3 className="mt-3 text-sm font-extrabold">Updating the work list…</h3><p className="mt-2 text-xs text-[var(--muted)]">The replacement is performed as one database transaction.</p></div> : null}
-    {error ? <p role="alert" className="mt-4 rounded-xl bg-[#f8ddd7] px-3 py-2 text-xs font-bold leading-5 text-[#8c3328]">{error}</p> : null}
-  </section></div>;
-}
-
-function InspectionUploadReview({ result, destination, existingWorkItem, replaceExisting, onReplaceExisting, onClose, onImport, onAttach }: { result: Extract<DocumentUploadResult, { documentType: "inspection" }>; destination: UploadDestination; existingWorkItem: Finding | null; replaceExisting: boolean; onReplaceExisting: (value: boolean) => void; onClose: () => void; onImport: () => void; onAttach: () => void }) {
-  return <div className="mt-6"><div className="rounded-[20px] bg-[var(--mint)]/55 p-4"><div className="flex items-center gap-3"><CheckCircle2 className="size-6 text-[var(--forest)]"/><div><p className="text-sm font-extrabold">{result.findings.length} findings proposed</p><p className="mt-0.5 text-xs text-[var(--muted)]">{result.report.propertyAddress ?? "Inspection report"} · {result.report.pageCount} pages</p></div></div></div>{result.reviewWarnings.length ? <div className="mt-3 rounded-xl bg-[#f9e6c8] p-3 text-xs leading-5 text-[#6f4c1d]">{result.reviewWarnings.join(" ")}</div> : null}<div className="mt-4 max-h-56 space-y-2 overflow-y-auto pr-1">{result.findings.slice(0, 12).map((finding) => <div key={finding.sourceSection} className="rounded-xl border border-black/6 bg-white/65 p-3"><div className="flex justify-between gap-3"><p className="text-xs font-extrabold">{finding.title}</p><span className="shrink-0 text-[10px] font-bold text-[var(--forest)]">{finding.sourceSection}</span></div><p className="mt-1 text-[10px] text-[var(--muted)]">{finding.category} · {formatSourcePages(finding.sourcePages)}</p></div>)}{result.findings.length > 12 ? <p className="py-2 text-center text-xs font-bold text-[var(--muted)]">Plus {result.findings.length - 12} more findings</p> : null}</div>{destination === "existing" ? <div className="mt-4 rounded-xl border border-[var(--forest)]/12 bg-white/60 p-4"><p className="text-xs font-extrabold">Attach to {existingWorkItem?.title ?? "selected work item"}</p><p className="mt-1 text-[11px] leading-5 text-[var(--muted)]">The original inspection and its searchable analysis will be attached without importing these findings as separate work items.</p></div> : <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-black/8 bg-white/60 p-4"><input type="checkbox" checked={replaceExisting} onChange={(event) => onReplaceExisting(event.target.checked)} className="mt-0.5 size-4 accent-[var(--forest)]"/><span><span className="block text-xs font-extrabold">Replace earlier inspection findings</span><span className="mt-1 block text-[11px] leading-5 text-[var(--muted)]">Removes older inspection-generated items, keeps manual work, and preserves section 10.4.1 with its status and history.</span></span></label>}<div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><button type="button" onClick={onClose} className="min-h-11 rounded-xl px-4 text-xs font-extrabold text-[var(--muted)]">Cancel</button><button type="button" onClick={destination === "existing" ? onAttach : onImport} className="min-h-11 rounded-xl bg-[var(--forest)] px-5 text-xs font-extrabold text-white">{destination === "existing" ? "Attach inspection report" : "Approve & import findings"}</button></div></div>;
-}
-
-function FinancialDocumentUploadReview({ result, findings, categories, areas, initialWorkItem, onClose }: { result: Extract<DocumentUploadResult, { documentType: "quote" | "invoice" | "receipt" }>; findings: Finding[]; categories: string[]; areas: string[]; initialWorkItem: Finding | null; onClose: () => void }) {
-  const document = result.normalized;
-  const vendor = document.vendor.name.value ?? "Vendor not identified";
-  const total = document.financials.total.amountMinor;
-  const warnings = [...document.review.warnings, ...document.review.unresolvedFields.map((field) => `Review ${field}.`)];
-  const proposedWork = document.proposedRecords.workItems[0];
-  const suggestedCategory = proposedWork?.category ?? document.scopeItems[0]?.category ?? "General";
-  const suggestedArea = proposedWork?.area ?? document.scopeItems[0]?.area ?? "General";
-  const categoryChoices = [...new Set([suggestedCategory, ...categories])];
-  const areaChoices = [...new Set([suggestedArea, ...areas])];
-  const [destination, setDestination] = useState<"new" | "existing">(initialWorkItem ? "existing" : "new");
-  const [title, setTitle] = useState(proposedWork?.title ?? document.document.title);
-  const [category, setCategory] = useState(suggestedCategory);
-  const [area, setArea] = useState(suggestedArea);
-  const [description, setDescription] = useState(document.document.summary);
-  const [searchQuery, setSearchQuery] = useState(initialWorkItem?.title ?? "");
-  const [selectedWorkItemId, setSelectedWorkItemId] = useState<string | null>(initialWorkItem?.workItemId ?? null);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [isSavingDestination, setIsSavingDestination] = useState(false);
-  const [destinationError, setDestinationError] = useState("");
-  const matchingFindings = useMemo(() => {
-    return filterFindings(findings, { query: searchQuery, severity: "all", category: "all" })
-      .filter((item): item is Finding & { workItemId: string } => Boolean(item.workItemId))
-      .slice(0, 8);
-  }, [findings, searchQuery]);
-
-  const saveDestination = async () => {
-    setDestinationError("");
-    setIsSavingDestination(true);
-    try {
-      if (destination === "existing") {
-        if (!selectedWorkItemId) throw new Error("Choose an existing work item first.");
-        await saveDocumentWorkDestinationAction({ documentId: result.documentId, destination, existingWorkItemId: selectedWorkItemId });
-      } else {
-        await saveDocumentWorkDestinationAction({
-          documentId: result.documentId,
-          destination,
-          title,
-          category,
-          area,
-          description,
-          workType: proposedWork?.workType ?? "other",
-          estimatedCostMinor: result.documentType === "quote" ? total : null,
-          currency: document.financials.total.currency,
-        });
-      }
-      window.location.reload();
-    } catch (error) {
-      setDestinationError(error instanceof Error ? error.message : "The document could not be linked to work.");
-      setIsSavingDestination(false);
-    }
-  };
-
-  return <div className="mt-6"><div className="rounded-[20px] bg-[var(--mint)]/55 p-4"><div className="flex items-start gap-3"><CheckCircle2 className="mt-0.5 size-6 shrink-0 text-[var(--forest)]"/><div className="min-w-0"><p className="text-sm font-extrabold">{result.documentType === "invoice" ? "Invoice extracted" : result.documentType === "receipt" ? "Receipt extracted" : "Quote extracted"}</p><p className="mt-1 truncate text-xs font-bold">{document.document.title}</p><p className="mt-1 text-xs text-[var(--muted)]">{vendor}{total === null ? "" : ` · ${formatMoney(total, document.financials.total.currency)}`}</p></div></div></div><dl className="mt-4 grid grid-cols-2 gap-2"><Detail label="Issued" value={document.document.issuedOn.value ?? "Not found"}/><Detail label="Reference" value={document.document.externalReference.value ?? "Not found"}/><Detail label="Scope items" value={String(document.scopeItems.length)}/><Detail label="Status" value={document.document.acceptanceStatus}/></dl>{warnings.length ? <div className="mt-3 rounded-xl bg-[#f9e6c8] p-3 text-xs leading-5 text-[#6f4c1d]">{warnings.slice(0, 5).join(" ")}</div> : null}<div className="mt-4 max-h-56 space-y-2 overflow-y-auto pr-1">{document.scopeItems.map((item) => <div key={item.key} className="rounded-xl border border-black/6 bg-white/65 p-3"><div className="flex justify-between gap-3"><p className="text-xs font-extrabold">{item.description}</p>{item.amount?.amountMinor === null || !item.amount ? null : <span className="shrink-0 text-xs font-extrabold text-[var(--forest)]">{formatMoney(item.amount.amountMinor, item.amount.currency)}</span>}</div><p className="mt-1 text-[10px] text-[var(--muted)]">{item.category ?? item.kind} · {formatSourcePages(item.evidence.pages)}</p></div>)}</div>
-    <section className="mt-5 border-t border-black/8 pt-5"><p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--muted)]">Add to work</p><h3 className="font-display mt-1 text-lg font-extrabold">{initialWorkItem ? `Attach to ${initialWorkItem.title}` : "What should this document do?"}</h3>{initialWorkItem ? <p className="mt-2 text-xs leading-5 text-[var(--muted)]">The original PDF will be added to this item’s Documents section after you approve the extracted details.</p> : <div className="mt-3 grid gap-2 sm:grid-cols-2"><button type="button" aria-pressed={destination === "new"} onClick={() => setDestination("new")} className={`min-h-12 rounded-xl px-4 text-sm font-extrabold ${destination === "new" ? "bg-[var(--forest)] text-white" : "border border-black/10 bg-white"}`}>Create new work item</button><button type="button" aria-pressed={destination === "existing"} onClick={() => setDestination("existing")} className={`min-h-12 rounded-xl px-4 text-sm font-extrabold ${destination === "existing" ? "bg-[var(--forest)] text-white" : "border border-black/10 bg-white"}`}>Attach to existing</button></div>}
-      {!initialWorkItem && destination === "new" ? <div className="mt-4 space-y-3 rounded-[18px] border border-black/7 bg-white/55 p-4"><label className="block"><span className="text-xs font-extrabold">Work item title</span><input value={title} onChange={(event) => setTitle(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 text-sm"/></label><div className="grid gap-3 sm:grid-cols-2"><label><span className="text-xs font-extrabold">Category</span><select value={category} onChange={(event) => setCategory(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 text-sm">{categoryChoices.map((choice) => <option key={choice}>{choice}</option>)}</select></label><label><span className="text-xs font-extrabold">Area</span><select value={area} onChange={(event) => setArea(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 text-sm">{areaChoices.map((choice) => <option key={choice}>{choice}</option>)}</select></label></div><label className="block"><span className="text-xs font-extrabold">Description</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={3} className="mt-2 w-full resize-y rounded-xl border border-black/10 bg-white p-3 text-sm leading-5"/></label></div>
-        : !initialWorkItem ? <div className="relative mt-4 rounded-[18px] border border-black/7 bg-white/55 p-4"><label className="block"><span className="text-xs font-extrabold">Find an existing work item</span><div className="relative mt-2"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--muted)]"/><input role="combobox" aria-autocomplete="list" aria-expanded={searchOpen} aria-controls="existing-work-options" value={searchQuery} onFocus={() => setSearchOpen(true)} onChange={(event) => { setSearchQuery(event.target.value); setSelectedWorkItemId(null); setSearchOpen(true); }} placeholder="Search by title, category, or area" className="h-11 w-full rounded-xl border border-black/10 bg-white pl-10 pr-3 text-sm"/></div></label>{searchOpen ? <div id="existing-work-options" role="listbox" className="mt-2 max-h-56 overflow-y-auto rounded-xl border border-black/8 bg-white p-1 shadow-lg">{matchingFindings.length ? matchingFindings.map((item) => <button key={item.workItemId} type="button" role="option" aria-selected={selectedWorkItemId === item.workItemId} onClick={() => { setSelectedWorkItemId(item.workItemId); setSearchQuery(item.title); setSearchOpen(false); }} className="w-full rounded-lg px-3 py-2.5 text-left hover:bg-[var(--mint)]"><span className="block text-xs font-extrabold">{item.title}</span><span className="mt-1 block text-[10px] text-[var(--muted)]">{item.category} · {item.area}</span></button>) : <p className="px-3 py-4 text-center text-xs text-[var(--muted)]">No matching work items</p>}</div> : null}{selectedWorkItemId && !searchOpen ? <p className="mt-2 flex items-center gap-1.5 text-xs font-extrabold text-[var(--forest)]"><CheckCircle2 className="size-4"/> Selected work item</p> : null}</div> : null}
-      {destinationError ? <p role="alert" className="mt-3 rounded-xl bg-[#f8ddd7] px-3 py-2 text-xs font-bold text-[#8c3328]">{destinationError}</p> : null}<p className="mt-3 text-xs leading-5 text-[var(--muted)]">The original private PDF and extracted details will remain linked to the work item.</p></section>
-    <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><a href={`/api/documents/${result.documentId}/view`} target="_blank" rel="noreferrer" className="flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 text-xs font-extrabold text-[var(--forest)]">Open original <ExternalLink className="size-3.5"/></a><button type="button" onClick={onClose} disabled={isSavingDestination} className="min-h-11 rounded-xl px-4 text-xs font-extrabold text-[var(--muted)] disabled:opacity-50">Not now</button><button type="button" onClick={saveDestination} disabled={isSavingDestination || (destination === "new" ? !title.trim() : !selectedWorkItemId)} className="min-h-11 rounded-xl bg-[var(--forest)] px-5 text-xs font-extrabold text-white disabled:opacity-40">{isSavingDestination ? "Saving…" : destination === "new" ? "Create & attach" : "Attach document"}</button></div></div>;
-}
-
-function PhotoUploadReview({ result, findings, categories, areas, initialWorkItem, onClose }: { result: Extract<DocumentUploadResult, { documentType: "photo" }>; findings: Finding[]; categories: string[]; areas: string[]; initialWorkItem: Finding | null; onClose: () => void }) {
-  const analysis = result.analysis;
-  const categoryChoices = categories.length ? categories : ["General"];
-  const areaChoices = areas.length ? areas : ["General"];
-  const [destination, setDestination] = useState<"new" | "existing">(initialWorkItem ? "existing" : analysis.suggestedWorkTitle ? "new" : "existing");
-  const [title, setTitle] = useState(analysis.suggestedWorkTitle ?? analysis.title);
-  const [description, setDescription] = useState(analysis.suggestedWorkDescription ?? analysis.summary);
-  const [category, setCategory] = useState(categoryChoices.includes(analysis.category ?? "") ? analysis.category! : categoryChoices[0]);
-  const [area, setArea] = useState(areaChoices.includes(analysis.area ?? "") ? analysis.area! : areaChoices[0]);
-  const [searchQuery, setSearchQuery] = useState(initialWorkItem?.title ?? "");
-  const [selectedWorkItemId, setSelectedWorkItemId] = useState<string | null>(initialWorkItem?.workItemId ?? null);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [saveError, setSaveError] = useState("");
-  const matchingFindings = findings.filter((item) => item.workItemId && `${item.title} ${item.category} ${item.area}`.toLowerCase().includes(searchQuery.trim().toLowerCase())).slice(0, 8);
-
-  const save = async () => {
-    setIsSaving(true);
-    setSaveError("");
-    try {
-      if (destination === "existing") {
-        if (!selectedWorkItemId) throw new Error("Choose a work item for this photo.");
-        await saveDocumentWorkDestinationAction({ documentId: result.documentId, destination: "existing", existingWorkItemId: selectedWorkItemId });
-      } else {
-        await saveDocumentWorkDestinationAction({
-          documentId: result.documentId,
-          destination: "new",
-          title,
-          category,
-          area,
-          description,
-          workType: "other",
-          estimatedCostMinor: null,
-          currency: "USD",
-        });
-      }
-      window.location.reload();
-    } catch (error) {
-      setSaveError(error instanceof Error ? error.message : "The photo could not be linked to work.");
-      setIsSaving(false);
-    }
-  };
-
-  return <div className="mt-6"><div className="rounded-[20px] bg-[var(--mint)]/55 p-4"><div className="flex items-start gap-3"><div className="grid size-10 shrink-0 place-items-center rounded-xl bg-[var(--forest)] text-white"><ImageIcon className="size-5"/></div><div className="min-w-0"><p className="text-sm font-extrabold">Photo analyzed</p><p className="mt-1 text-xs font-bold">{analysis.title}</p><p className="mt-2 text-xs leading-5 text-[var(--muted)]">{analysis.summary}</p></div></div>{analysis.observations.length ? <ul className="mt-3 space-y-1 text-xs leading-5">{analysis.observations.slice(0, 5).map((observation) => <li key={observation}>• {observation}</li>)}</ul> : null}{analysis.safetyConcerns.length ? <div className="mt-3 rounded-xl bg-[#f8ddd7] p-3 text-xs leading-5 text-[#8c3328]">Possible safety concern: {analysis.safetyConcerns.join(" ")}</div> : null}</div>
-    <section className="mt-5 border-t border-black/8 pt-5"><p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--muted)]">Add to work</p><h3 className="font-display mt-1 text-lg font-extrabold">{initialWorkItem ? `Attach to ${initialWorkItem.title}` : "Where should this photo live?"}</h3>{initialWorkItem ? <p className="mt-2 text-xs leading-5 text-[var(--muted)]">The original photo and its searchable analysis will be attached to this item.</p> : <div className="mt-3 grid gap-2 sm:grid-cols-2"><button type="button" aria-pressed={destination === "new"} onClick={() => setDestination("new")} className={`min-h-12 rounded-xl px-4 text-sm font-extrabold ${destination === "new" ? "bg-[var(--forest)] text-white" : "border border-black/10 bg-white"}`}>Create new work item</button><button type="button" aria-pressed={destination === "existing"} onClick={() => setDestination("existing")} className={`min-h-12 rounded-xl px-4 text-sm font-extrabold ${destination === "existing" ? "bg-[var(--forest)] text-white" : "border border-black/10 bg-white"}`}>Attach to existing</button></div>}
-      {!initialWorkItem && destination === "new" ? <div className="mt-4 space-y-3 rounded-[18px] border border-black/7 bg-white/55 p-4"><label className="block"><span className="text-xs font-extrabold">Work item title</span><input value={title} onChange={(event) => setTitle(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 text-sm"/></label><label className="block"><span className="text-xs font-extrabold">Description</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={3} className="mt-2 w-full resize-y rounded-xl border border-black/10 bg-white p-3 text-sm leading-5"/></label><div className="grid gap-3 sm:grid-cols-2"><label><span className="text-xs font-extrabold">Category</span><select value={category} onChange={(event) => setCategory(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 text-sm">{categoryChoices.map((choice) => <option key={choice}>{choice}</option>)}</select></label><label><span className="text-xs font-extrabold">Area</span><select value={area} onChange={(event) => setArea(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-black/10 bg-white px-3 text-sm">{areaChoices.map((choice) => <option key={choice}>{choice}</option>)}</select></label></div></div> : !initialWorkItem ? <div className="relative mt-4 rounded-[18px] border border-black/7 bg-white/55 p-4"><label className="block"><span className="text-xs font-extrabold">Find an existing work item</span><div className="relative mt-2"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--muted)]"/><input role="combobox" aria-controls="photo-work-options" aria-expanded={searchOpen} value={searchQuery} onFocus={() => setSearchOpen(true)} onChange={(event) => { setSearchQuery(event.target.value); setSelectedWorkItemId(null); setSearchOpen(true); }} placeholder="Search work items" className="h-11 w-full rounded-xl border border-black/10 bg-white pl-10 pr-3 text-sm"/></div></label>{searchOpen ? <div id="photo-work-options" role="listbox" className="mt-2 max-h-56 overflow-y-auto rounded-xl border border-black/8 bg-white p-1 shadow-lg">{matchingFindings.length ? matchingFindings.map((item) => <button key={item.workItemId} type="button" role="option" aria-selected={selectedWorkItemId === item.workItemId} onClick={() => { setSelectedWorkItemId(item.workItemId!); setSearchQuery(item.title); setSearchOpen(false); }} className="w-full rounded-lg px-3 py-2.5 text-left hover:bg-[var(--mint)]"><span className="block text-xs font-extrabold">{item.title}</span><span className="mt-1 block text-[10px] text-[var(--muted)]">{item.category} · {item.area}</span></button>) : <p className="px-3 py-4 text-center text-xs text-[var(--muted)]">No matching work items</p>}</div> : null}</div> : null}
-      {saveError ? <p role="alert" className="mt-3 rounded-xl bg-[#f8ddd7] px-3 py-2 text-xs font-bold text-[#8c3328]">{saveError}</p> : null}</section>
-    <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><a href={`/api/documents/${result.documentId}/view`} target="_blank" rel="noreferrer" className="flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 text-xs font-extrabold text-[var(--forest)]">Open original <ExternalLink className="size-3.5"/></a><button type="button" onClick={onClose} disabled={isSaving} className="min-h-11 rounded-xl px-4 text-xs font-extrabold text-[var(--muted)] disabled:opacity-50">Not now</button><button type="button" onClick={save} disabled={isSaving || (destination === "new" ? !title.trim() : !selectedWorkItemId)} className="min-h-11 rounded-xl bg-[var(--forest)] px-5 text-xs font-extrabold text-white disabled:opacity-40">{isSaving ? "Saving…" : destination === "new" ? "Create & attach" : "Attach photo"}</button></div></div>;
-}
-
 function AddWorkDialog({ seed, onClose, onAdd, onUpload }: { seed: InspectionSeed; onClose: () => void; onAdd: (item: LocalWorkItem) => Promise<void>; onUpload: () => void }) {
   const categories = [...new Set(seed.findings.map((item) => item.category))].sort();
   const [title, setTitle] = useState("");
@@ -1089,4 +818,17 @@ function AddWorkDialog({ seed, onClose, onAdd, onUpload }: { seed: InspectionSee
   };
 
   return <div className="fixed inset-0 z-50 grid items-end bg-[#0d1e17]/45 p-0 backdrop-blur-sm sm:place-items-center sm:p-6" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}><div role="dialog" aria-modal="true" aria-labelledby="add-work-title" className="max-h-[94dvh] w-full overflow-y-auto rounded-t-[28px] bg-[var(--paper)] p-5 shadow-2xl sm:max-w-lg sm:rounded-[28px] sm:p-7"><div className="flex items-start justify-between"><div><p className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-[var(--forest)]">Quick capture</p><h2 id="add-work-title" className="font-display mt-1 text-2xl font-extrabold tracking-tight">Add work</h2></div><button type="button" onClick={onClose} className="grid size-10 place-items-center rounded-xl bg-black/5" aria-label="Close"><X className="size-5"/></button></div><button type="button" onClick={onUpload} className="mt-5 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-[var(--forest)]/20 bg-[var(--mint)]/50 text-sm font-extrabold text-[var(--forest)]"><Upload className="size-[18px]" /> Upload an attachment</button><div className="my-5 flex items-center gap-3 text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--muted)]"><span className="h-px flex-1 bg-black/8" />or add one item<span className="h-px flex-1 bg-black/8" /></div><form onSubmit={submit} className="space-y-4"><label className="block"><span className="text-xs font-extrabold">What needs to be done?</span><input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Service upstairs furnace" className="mt-2 h-12 w-full rounded-xl border border-black/10 bg-white px-4 text-sm"/></label><label className="block"><span className="text-xs font-extrabold">Description <span className="font-normal text-[var(--muted)]">(optional)</span></span><textarea value={description} onChange={(event) => setDescription(event.target.value)} maxLength={5000} rows={3} placeholder="Add useful details, symptoms, or next steps" className="mt-2 w-full resize-y rounded-xl border border-black/10 bg-white px-4 py-3 text-sm leading-6"/></label><div className="grid gap-4 sm:grid-cols-2"><label><span className="text-xs font-extrabold">Category</span><select value={category} onChange={(event) => setCategory(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-black/10 bg-white px-3 text-sm">{categories.map((name) => <option key={name}>{name}</option>)}</select></label><label><span className="text-xs font-extrabold">Area</span><select value={area} onChange={(event) => setArea(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-black/10 bg-white px-3 text-sm">{seed.areas.map((name) => <option key={name}>{name}</option>)}</select></label></div><button type="button" onClick={onUpload} className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-dashed border-black/15 text-sm font-bold text-[var(--muted)]"><Camera className="size-[18px]"/> Add photo or screenshot</button>{saveError ? <p role="alert" className="rounded-xl bg-[#f8ddd7] px-3 py-2 text-xs font-bold text-[#8c3328]">{saveError}</p> : null}<button type="submit" disabled={!title.trim() || isSaving} className="min-h-12 w-full rounded-xl bg-[var(--forest)] text-sm font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-40">{isSaving ? "Saving…" : "Save to work inbox"}</button></form></div></div>;
+}
+
+function PageHeading({ eyebrow, title, description }: { eyebrow: string; title: string; description: string }) {
+  return <header><p className="text-xs font-extrabold uppercase tracking-[0.14em] text-[var(--forest)]">{eyebrow}</p><h1 className="font-display mt-2 text-3xl font-extrabold tracking-[-0.05em] sm:text-4xl">{title}</h1><p className="mt-3 max-w-2xl text-sm leading-6 text-[var(--muted)] sm:text-base">{description}</p></header>;
+}
+
+function MobileNav({ activeView, onChangeView, canAdd, onAdd }: { activeView: View; onChangeView: (view: View) => void; canAdd: boolean; onAdd: () => void }) {
+  return <nav className="relative z-40 grid min-h-[72px] grid-cols-5 border-t border-black/8 bg-[var(--paper)] px-2 pb-[max(8px,env(safe-area-inset-bottom))] pt-2 lg:hidden" aria-label="Mobile navigation">{navItems.slice(0, 2).map((item) => <MobileNavButton key={item.id} item={item} active={activeView === item.id} onClick={() => onChangeView(item.id)} />)}<button type="button" onClick={onAdd} disabled={!canAdd} className="mx-auto -mt-7 grid size-14 place-items-center rounded-[20px] bg-[var(--forest)] text-white shadow-xl shadow-[#214f3e]/25 disabled:cursor-not-allowed disabled:bg-[var(--muted)] disabled:opacity-55" aria-label={canAdd ? "Add work" : "Choose a property to add work"}><Plus className="size-6"/></button>{navItems.slice(2).map((item) => <MobileNavButton key={item.id} item={item} active={activeView === item.id} onClick={() => onChangeView(item.id)} />)}</nav>;
+}
+
+function MobileNavButton({ item, active, onClick }: { item: (typeof navItems)[number]; active: boolean; onClick: () => void }) {
+  const Icon = item.icon;
+  return <button type="button" onClick={onClick} className={`flex min-h-12 flex-col items-center justify-center gap-1 text-[10px] font-extrabold ${active ? "text-[var(--forest)]" : "text-[var(--muted)]"}`} aria-current={active ? "page" : undefined}><Icon className="size-5" strokeWidth={active ? 2.5 : 1.9}/>{item.label}</button>;
 }

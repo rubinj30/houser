@@ -9,6 +9,7 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:e2e:provision": "node --env-file=.env.local scripts/provision-e2e-account.mjs",
     "test:e2e": "playwright test",
     "test:e2e:public": "playwright test --project=public-mobile",
     "test:e2e:headed": "playwright test --headed"

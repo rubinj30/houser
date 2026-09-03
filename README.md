@@ -23,7 +23,7 @@ npm run test:e2e
 npm run build
 ```
 
-The Playwright suite runs the critical Work-planning paths at mobile and desktop sizes. Configure the optional `E2E_USER_EMAIL` and `E2E_USER_PASSWORD` values from `.env.example` with a disposable test household; authenticated tests skip when those credentials are absent.
+The Playwright suite runs critical Work-planning paths at mobile and desktop sizes. Configure the test-only values from `.env.example`, then run `npm run test:e2e:provision` once to create or reset the disposable Supabase test household. The provisioning command requires the server-only service-role key; it never exposes that key to Playwright or browser code. Authenticated tests skip when the dedicated email and password are absent.
 
 Planning documents:
 

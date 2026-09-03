@@ -2,7 +2,6 @@ import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
 import { buildInspectionSearchQuery, type HouserChatSnapshot } from "@/lib/houser-chat";
-import { extractDocumentTextPages } from "@/lib/pdf-text";
 
 function relatedName(value: unknown) {
   if (Array.isArray(value)) return typeof value[0]?.name === "string" ? value[0].name : null;
@@ -69,7 +68,7 @@ export async function getHouserChatData(question = "") {
       .limit(200),
     supabase
       .from("documents")
-      .select("id,property_id,document_type,original_filename,mime_type,document_date,status,storage_bucket,storage_key")
+      .select("id,property_id,document_type,original_filename,document_date,status")
       .in("property_id", propertyIds)
       .neq("status", "failed")
       .order("created_at", { ascending: false })
@@ -90,39 +89,6 @@ export async function getHouserChatData(question = "") {
   const documentIndex = new Map(documents.map((document) => [document.id, document]));
   let attachmentPageRows: Array<{ document_id: string; page_number: number; content: string }> = [];
   if (documentIds.length) {
-    const { data: indexedDocuments, error: indexedDocumentsError } = await supabase
-      .from("document_text_pages")
-      .select("document_id")
-      .in("document_id", documentIds)
-      .limit(1000);
-    if (indexedDocumentsError) throw new Error(`Could not check attachment text for Houser chat: ${indexedDocumentsError.message}`);
-    const indexedIds = new Set((indexedDocuments ?? []).map((page) => page.document_id));
-    const missingDocuments = documents.filter((document) => document.mime_type === "application/pdf" && !indexedIds.has(document.id));
-
-    await Promise.all(missingDocuments.map(async (document) => {
-      try {
-        const bucket = document.storage_bucket ?? "documents";
-        const { data: signed, error: signedError } = await supabase.storage.from(bucket).createSignedUrl(document.storage_key, 300);
-        if (signedError || !signed?.signedUrl) throw new Error("Private PDF could not be opened.");
-        const response = await fetch(signed.signedUrl);
-        if (!response.ok) throw new Error("Private PDF could not be downloaded.");
-        const pages = await extractDocumentTextPages(await response.arrayBuffer());
-        const { error: upsertError } = await supabase.from("document_text_pages").upsert(
-          pages.map((page) => ({
-            document_id: document.id,
-            page_number: page.pageNumber,
-            content: page.content,
-            content_sha256: page.contentSha256,
-          })),
-          { onConflict: "document_id,page_number" },
-        );
-        if (upsertError) throw upsertError;
-        await supabase.from("documents").update({ page_count: pages.length }).eq("id", document.id);
-      } catch (error) {
-        console.error("Could not backfill attachment text for Ask Houser", { documentId: document.id, error });
-      }
-    }));
-
     let pageQuery = supabase
       .from("document_text_pages")
       .select("document_id,page_number,content")
