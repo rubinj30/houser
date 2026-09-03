@@ -23,6 +23,13 @@ export type PlannedWorkItem = {
   updatedAt: string;
 };
 
+export type InspectionReviewMode = "reviewed_report" | "skip_detailed_review";
+
+export type InspectionReviewAcceptance = {
+  acceptedCount: number;
+  workItemIds: string[];
+};
+
 const categoryAliases: Record<string, string> = {
   HVAC: "HVAC and Ventilation",
   Plumbing: "Plumbing and Water",
@@ -57,6 +64,25 @@ async function planWorkItem(supabase: SupabaseClient, parameters: Record<string,
   if (error) throw new Error(error.message);
   if (!data || typeof data !== "object") throw new Error("Work planning did not return the saved Work item.");
   return data as PlannedWorkItem;
+}
+
+export async function acceptRemainingInspectionFindings(
+  supabase: SupabaseClient,
+  input: { propertyId: string; mode: InspectionReviewMode },
+): Promise<InspectionReviewAcceptance> {
+  const { data, error } = await supabase.rpc("accept_inspection_review", {
+    target_property_id: input.propertyId,
+    review_mode: input.mode,
+  });
+  if (error) throw new Error(error.message);
+  const result = data as { acceptedCount?: unknown; workItemIds?: unknown } | null;
+  if (!result || typeof result.acceptedCount !== "number" || !Array.isArray(result.workItemIds)) {
+    throw new Error("Inspection review did not return the accepted Work items.");
+  }
+  return {
+    acceptedCount: result.acceptedCount,
+    workItemIds: result.workItemIds.filter((id): id is string => typeof id === "string"),
+  };
 }
 
 export async function createManualWorkItem(

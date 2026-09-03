@@ -59,7 +59,7 @@ function relatedName(value: WorkItemRow["categories"] | WorkItemRow["areas"], fa
   return value?.name ?? fallback;
 }
 
-function databaseFinding(row: WorkItemRow, propertyNames: Map<string, string>, allProperties: boolean): Finding {
+function databaseFinding(row: WorkItemRow, propertyNames: Map<string, string>, allProperties: boolean, inspectionDocumentIds: Set<string>): Finding {
   const area = relatedName(row.areas, row.source_location ?? "General");
   const sourceReference = row.source_section ?? row.source_key ?? `manual-${row.id}`;
   return {
@@ -78,6 +78,7 @@ function databaseFinding(row: WorkItemRow, propertyNames: Map<string, string>, a
     suggestedAction: row.description ?? "Review this work item and add scheduling details.",
     sourcePages: row.source_page_numbers ?? [],
     sourceDocumentId: row.source_document_id ?? undefined,
+    isInspectionFinding: row.source_document_id ? inspectionDocumentIds.has(row.source_document_id) : false,
     sourceExcerpt: row.source_excerpt ?? undefined,
     targetStartOn: row.target_start_on,
     targetEndOn: row.target_end_on,
@@ -140,7 +141,7 @@ export async function getHouserWorkspace(requestedPropertyId?: string): Promise<
     { data: workItems, error: workItemsError },
     { data: activities, error: activitiesError },
     { data: services, error: servicesError },
-    { data: inspectionDocument, error: inspectionDocumentError },
+    { data: inspectionDocuments, error: inspectionDocumentError },
   ] = await Promise.all([
     supabase
       .from("work_items")
@@ -164,8 +165,7 @@ export async function getHouserWorkspace(requestedPropertyId?: string): Promise<
       .select("id")
       .in("property_id", propertyIds)
       .eq("document_type", "inspection")
-      .neq("status", "failed")
-      .limit(1),
+      .neq("status", "failed"),
   ]);
 
   if (workItemsError) throw new Error(`Could not load Houser work: ${workItemsError.message}`);
@@ -176,7 +176,8 @@ export async function getHouserWorkspace(requestedPropertyId?: string): Promise<
   const seed = inspectionSeed as InspectionSeed;
   const rows = (workItems ?? []) as WorkItemRow[];
   const allProperties = selectedPropertyId === "all";
-  const findings = rows.map((row) => databaseFinding(row, propertyNames, allProperties));
+  const inspectionDocumentIds = new Set((inspectionDocuments ?? []).map((document) => document.id));
+  const findings = rows.map((row) => databaseFinding(row, propertyNames, allProperties, inspectionDocumentIds));
   const reportIdByWorkItemId = new Map(findings.flatMap((finding) => finding.workItemId ? [[finding.workItemId, finding.reportId] as const] : []));
   const reviewStatuses = Object.fromEntries(
     rows.map((row) => [reportIdByWorkItemId.get(row.id) ?? row.id, databaseStatusToReview(row.status)]),
@@ -248,7 +249,7 @@ export async function getHouserWorkspace(requestedPropertyId?: string): Promise<
     selectedPropertyId,
     properties: propertySummaries,
     userEmail: typeof claims.email === "string" ? claims.email : "Signed-in owner",
-    hasInspectionDocument: Boolean(inspectionDocument?.length),
+    hasInspectionDocument: inspectionDocumentIds.size > 0,
     seed: workspaceSeed,
     findings,
     reviewStatuses,

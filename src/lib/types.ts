@@ -18,6 +18,7 @@ export type Finding = {
   suggestedAction: string;
   sourcePages: number[];
   sourceDocumentId?: string;
+  isInspectionFinding?: boolean;
   sourceExcerpt?: string;
   targetStartOn?: string | null;
   targetEndOn?: string | null;

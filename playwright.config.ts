@@ -45,6 +45,7 @@ export default defineConfig({
       use: {
         ...devices["iPhone 13"],
         browserName: "chromium",
+        viewport: { width: 360, height: 800 },
         storageState: hasAuthenticatedTestAccount ? "e2e/.auth/user.json" : undefined,
       },
       dependencies: ["auth"],

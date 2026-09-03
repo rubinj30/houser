@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { queryResult } from "@/test/supabase-query-mock";
 import {
+  acceptRemainingInspectionFindings,
   completePlannedWorkItem,
   createChatWorkItem,
   createManualWorkItem,
@@ -35,6 +36,16 @@ function rpcClient(data: unknown = savedWork) {
 }
 
 describe("Work planning", () => {
+  it("accepts the remaining inspection inbox through one transactional interface", async () => {
+    const client = rpcClient({ acceptedCount: 2, workItemIds: [workItemId, "33333333-3333-4333-8333-333333333333"] });
+    const result = await acceptRemainingInspectionFindings(client as never, { propertyId, mode: "reviewed_report" });
+    expect(client.rpc).toHaveBeenCalledWith("accept_inspection_review", {
+      target_property_id: propertyId,
+      review_mode: "reviewed_report",
+    });
+    expect(result).toEqual({ acceptedCount: 2, workItemIds: [workItemId, "33333333-3333-4333-8333-333333333333"] });
+  });
+
   it("owns the shared category vocabulary", () => {
     expect(normalizeWorkCategory("HVAC")).toBe("HVAC and Ventilation");
     expect(normalizeWorkCategory("Roof and Drainage")).toBe("Roof and Drainage");

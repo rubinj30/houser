@@ -8,7 +8,7 @@ import { isHouserEmailAllowed } from "@/lib/supabase/admin";
 import { createHouseholdProperty } from "@/lib/property-mutations";
 import { createClient } from "@/lib/supabase/server";
 import type { InspectionEvidence, LinkedWorkDocument, LocalWorkItem, ReviewActivity, ReviewStatus, WorkCompletionInput, WorkCompletionResult } from "@/lib/types";
-import { completePlannedWorkItem, createManualWorkItem, linkDocumentToWorkItem, recordWorkItemReview } from "@/lib/work-planning";
+import { acceptRemainingInspectionFindings, completePlannedWorkItem, createManualWorkItem, linkDocumentToWorkItem, recordWorkItemReview } from "@/lib/work-planning";
 
 const reviewUpdateSchema = z.object({
   workItemId: z.uuid(),
@@ -18,6 +18,10 @@ const reviewUpdateSchema = z.object({
 });
 
 const evidenceRequestSchema = z.object({ workItemId: z.uuid() });
+const inspectionReviewSchema = z.object({
+  propertyId: z.uuid(),
+  mode: z.enum(["reviewed_report", "skip_detailed_review"]),
+});
 
 const manualWorkSchema = z.object({
   propertyId: z.uuid(),
@@ -157,6 +161,14 @@ export async function recordReviewUpdateAction(input: {
   const values = reviewUpdateSchema.parse(input);
   const { supabase } = await requireUser();
   const result = await recordWorkItemReview(supabase, values);
+  revalidatePath("/");
+  return result;
+}
+
+export async function acceptInspectionReviewAction(input: z.input<typeof inspectionReviewSchema>) {
+  const values = inspectionReviewSchema.parse(input);
+  const { supabase } = await requireUser();
+  const result = await acceptRemainingInspectionFindings(supabase, values);
   revalidatePath("/");
   return result;
 }
