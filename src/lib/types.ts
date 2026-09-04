@@ -1,5 +1,5 @@
 export type Severity = "maintenance_item" | "recommendation" | "safety_hazard";
-export type Priority = "urgent" | "important" | "routine" | "informational";
+export type Priority = "emergency" | "urgent" | "important" | "routine" | "informational";
 
 export type Finding = {
   workItemId?: string;

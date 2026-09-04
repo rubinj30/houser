@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { countBySeverity, filterFindings, formatSourcePages, groupByCategory, mergeFindings } from "./findings";
+import { countBySeverity, filterFindings, formatSourcePages, getPrioritizedFindings, groupByCategory, mergeFindings } from "./findings";
 import type { Finding } from "./types";
 
 const makeFinding = (overrides: Partial<Finding>): Finding => ({
@@ -48,5 +48,32 @@ describe("finding helpers", () => {
     const refreshed = { ...persisted, workItemId: "work-1" };
 
     expect(mergeFindings([local], [refreshed])).toEqual([local]);
+  });
+
+  it("builds a short, explainable priority queue", () => {
+    const candidates = [
+      makeFinding({ reportId: "important", title: "Important later", priority: "important" }),
+      makeFinding({ reportId: "overdue", title: "Overdue work", priority: "routine", targetEndOn: "2026-08-01" }),
+      makeFinding({ reportId: "safety", title: "Safety finding", priority: "routine", severity: "safety_hazard" }),
+      makeFinding({ reportId: "deferred", title: "Deferred urgent", priority: "urgent" }),
+      makeFinding({ reportId: "routine", title: "Routine work", priority: "routine" }),
+    ];
+    const result = getPrioritizedFindings(candidates, { deferred: "deferred" }, "2026-09-04");
+
+    expect(result.map(({ finding, reason }) => [finding.reportId, reason])).toEqual([
+      ["overdue", "Overdue"],
+      ["safety", "Safety"],
+      ["important", "Important"],
+    ]);
+  });
+
+  it("ranks emergency work ahead of safety and due-soon work", () => {
+    const candidates = [
+      makeFinding({ reportId: "soon", priority: "routine", targetStartOn: "2026-09-20", targetEndOn: "2026-11-01" }),
+      makeFinding({ reportId: "safety", priority: "routine", severity: "safety_hazard" }),
+      makeFinding({ reportId: "emergency", priority: "emergency" }),
+    ];
+
+    expect(getPrioritizedFindings(candidates, {}, "2026-09-04").map((item) => item.reason)).toEqual(["Emergency", "Safety", "Due soon"]);
   });
 });

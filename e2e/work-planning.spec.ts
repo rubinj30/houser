@@ -47,7 +47,7 @@ async function seedInspectionReview() {
     source_key: `e2e-guided-${marker}-${index}`,
     source_section: `E2E.${index + 1}`,
     source_category: "Exterior",
-    source_severity: "recommendation",
+    source_severity: index === 0 ? "safety_hazard" : "recommendation",
     title,
     description: "Verify this automated inspection finding.",
     work_type: "inspect",
@@ -126,6 +126,14 @@ test.describe("Work planning critical paths", () => {
     const seeded = await seedInspectionReview();
     try {
       await page.goto("/");
+      const priorities = page.locator('section[aria-labelledby="priorities-heading"]');
+      await expect(priorities).toBeVisible();
+      await expect(priorities).toContainText(seeded.titles[0]);
+      await priorities.getByRole("button", { name: `Open priority: ${seeded.titles[0]}` }).click();
+      await expect(page.getByRole("dialog", { name: seeded.titles[0] })).toBeVisible();
+      await page.getByRole("dialog", { name: seeded.titles[0] }).getByRole("button", { name: "Close" }).click();
+      await page.getByRole("button", { name: "Home", exact: true }).click();
+
       const reviewCard = page.getByText("Inspection review", { exact: true }).locator("..").locator("..");
       await expect(reviewCard).toContainText("0 of 2");
       await page.getByRole("button", { name: "Continue review" }).click();

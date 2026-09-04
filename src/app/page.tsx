@@ -23,6 +23,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ a
       initialReviewStatuses={workspace.reviewStatuses}
       initialReviewActivities={workspace.reviewActivities}
       initialServiceRecords={workspace.serviceRecords}
+      today={new Date().toISOString().slice(0, 10)}
     />
   );
 }

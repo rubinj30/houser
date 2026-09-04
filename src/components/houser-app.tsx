@@ -49,9 +49,11 @@ import {
   countBySeverity,
   filterFindings,
   formatSourcePages,
+  getPrioritizedFindings,
   groupByCategory,
   mergeFindings,
   severityLabels,
+  type PrioritizedFinding,
 } from "@/lib/findings";
 import type { Finding, InspectionEvidence, InspectionSeed, LinkedWorkDocument, LocalWorkItem, PropertySummary, ReviewActivity, ReviewStatus, ServiceRecord, Severity, WorkCompletionInput } from "@/lib/types";
 import { isClosedReviewStatus } from "@/lib/work-status";
@@ -103,7 +105,7 @@ const navItems: { id: View; label: string; icon: LucideIcon }[] = [
   { id: "assets", label: "Assets", icon: Grid2X2 },
 ];
 
-export function HouserApp({ seed, propertyId, selectedPropertyId, properties, userEmail, hasInspectionDocument, initialWorkReportId, initialReviewStatuses, initialReviewActivities, initialServiceRecords }: { seed: InspectionSeed; propertyId: string | null; selectedPropertyId: string | "all"; properties: PropertySummary[]; userEmail: string; hasInspectionDocument: boolean; initialWorkReportId: string | null; initialReviewStatuses: Record<string, ReviewStatus>; initialReviewActivities: ReviewActivity[]; initialServiceRecords: ServiceRecord[] }) {
+export function HouserApp({ seed, propertyId, selectedPropertyId, properties, userEmail, hasInspectionDocument, initialWorkReportId, initialReviewStatuses, initialReviewActivities, initialServiceRecords, today }: { seed: InspectionSeed; propertyId: string | null; selectedPropertyId: string | "all"; properties: PropertySummary[]; userEmail: string; hasInspectionDocument: boolean; initialWorkReportId: string | null; initialReviewStatuses: Record<string, ReviewStatus>; initialReviewActivities: ReviewActivity[]; initialServiceRecords: ServiceRecord[]; today: string }) {
   const router = useRouter();
   const contentScrollRef = useRef<HTMLDivElement>(null);
   const initialWorkItem = seed.findings.find((item) => item.reportId === initialWorkReportId || item.workItemId === initialWorkReportId);
@@ -191,7 +193,7 @@ export function HouserApp({ seed, propertyId, selectedPropertyId, properties, us
         <TopBar selectedPropertyId={selectedPropertyId} properties={properties} userEmail={userEmail} setProperty={selectProperty} canAdd={Boolean(propertyId)} onAdd={() => setIsAdding(true)} onUpload={() => { setUploadTarget(null); setIsUploadingInspection(true); }} />
         <main className="mx-auto w-full max-w-[1500px] px-4 pb-10 pt-5 sm:px-6 lg:px-10 lg:pb-14 lg:pt-8">
           {activeView === "home" ? (
-            <HomeView seed={seed} findings={currentFindings} allFindings={allFindings} reviewStatuses={reviewStatuses} hasInspectionDocument={hasInspectionDocument} canAdd={Boolean(propertyId)} onOpenWork={openWork} onAcceptInspectionReview={acceptInspectionReview} onUpload={() => { setUploadTarget(null); setIsUploadingInspection(true); }} />
+            <HomeView seed={seed} findings={currentFindings} allFindings={allFindings} reviewStatuses={reviewStatuses} hasInspectionDocument={hasInspectionDocument} canAdd={Boolean(propertyId)} today={today} onOpenWork={openWork} onAcceptInspectionReview={acceptInspectionReview} onUpload={() => { setUploadTarget(null); setIsUploadingInspection(true); }} />
           ) : activeView === "work" ? (
             <WorkView key={workIntent.revision} findings={allFindings} calendarProperty={calendarProperty} initialCategory={workIntent.category} initialSeverity={workIntent.severity} initialSelectedReportId={workIntent.selectedReportId} guidedReview={workIntent.guidedReview} reviewStatuses={reviewStatuses} reviewActivities={reviewActivities} serviceRecords={serviceRecords} onRecordReview={recordReviewUpdate} onCompleteWork={completeWorkItem} onAttachDocument={(item) => { setUploadTarget(item); setIsUploadingInspection(true); }} />
           ) : activeView === "timeline" ? (
@@ -295,11 +297,11 @@ function PropertySelect({ selectedPropertyId, properties, setProperty, className
   );
 }
 
-function HomeView({ seed, findings, allFindings, reviewStatuses, hasInspectionDocument, canAdd, onOpenWork, onAcceptInspectionReview, onUpload }: { seed: InspectionSeed; findings: Finding[]; allFindings: Finding[]; reviewStatuses: Record<string, ReviewStatus>; hasInspectionDocument: boolean; canAdd: boolean; onOpenWork: (intent?: Partial<Omit<WorkIntent, "revision">>) => void; onAcceptInspectionReview: (mode: InspectionReviewMode) => Promise<{ acceptedCount: number }>; onUpload: () => void }) {
+function HomeView({ seed, findings, allFindings, reviewStatuses, hasInspectionDocument, canAdd, today, onOpenWork, onAcceptInspectionReview, onUpload }: { seed: InspectionSeed; findings: Finding[]; allFindings: Finding[]; reviewStatuses: Record<string, ReviewStatus>; hasInspectionDocument: boolean; canAdd: boolean; today: string; onOpenWork: (intent?: Partial<Omit<WorkIntent, "revision">>) => void; onAcceptInspectionReview: (mode: InspectionReviewMode) => Promise<{ acceptedCount: number }>; onUpload: () => void }) {
   const [showReviewOptions, setShowReviewOptions] = useState(false);
   const counts = countBySeverity(findings);
   const categories = groupByCategory(findings).slice(0, 6);
-  const safetyItems = findings.filter((item) => item.severity === "safety_hazard").slice(0, 4);
+  const priorities = getPrioritizedFindings(findings, reviewStatuses, today);
   const inspectionReview = getInspectionReviewProgress(allFindings, reviewStatuses);
 
   return (
@@ -318,6 +320,27 @@ function HomeView({ seed, findings, allFindings, reviewStatuses, hasInspectionDo
         <SummaryCard label="Safety items" value={counts.safety_hazard} note="Verify first" icon={ShieldAlert} tone="rose" />
         <SummaryCard label="Maintenance" value={counts.maintenance_item} note="Recurring candidates" icon={Clock3} tone="amber" />
         <SummaryCard label="Tracked assets" value={seed.assets.length} note="From report" icon={HardHat} tone="lime" />
+      </section>
+
+      <section className="mt-8" aria-labelledby="priorities-heading">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-[var(--forest)]">Focus next</p>
+            <h2 id="priorities-heading" className="font-display mt-1 text-2xl font-extrabold tracking-[-0.04em] sm:text-3xl">Priorities</h2>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--muted)]">Ranked by overdue dates, emergencies, safety, urgency, and work due within 30 days.</p>
+          </div>
+          <button type="button" onClick={() => onOpenWork()} className="min-h-11 self-start rounded-xl px-1 text-sm font-extrabold text-[var(--forest)] hover:underline sm:self-auto">View all work</button>
+        </div>
+        {priorities.length ? (
+          <div className="mt-4 grid gap-3 lg:grid-cols-3">
+            {priorities.map((priority) => <PriorityFindingCard key={priority.finding.workItemId ?? priority.finding.reportId} item={priority} status={reviewStatuses[priority.finding.reportId] ?? "needs_review"} onOpen={() => onOpenWork({ selectedReportId: priority.finding.reportId })} />)}
+          </div>
+        ) : (
+          <div className="mt-4 rounded-[24px] border border-black/6 bg-[var(--paper)] p-6 surface-shadow">
+            <p className="text-sm font-extrabold">Nothing urgent is competing for attention.</p>
+            <p className="mt-1 text-sm leading-6 text-[var(--muted)]">Routine and informational work remains available in Work.</p>
+          </div>
+        )}
       </section>
 
       <section className={`mt-4 grid gap-4 ${hasInspectionDocument || !canAdd ? "" : "xl:grid-cols-[1.45fr_0.75fr]"}`}>
@@ -344,15 +367,9 @@ function HomeView({ seed, findings, allFindings, reviewStatuses, hasInspectionDo
         </div>
       </section>
 
-      <section className="mt-8 grid gap-7 xl:grid-cols-[1fr_1.1fr]">
-        <div>
-          <SectionHeading eyebrow="Organize by system" title="Where the work lives" action="All categories" onAction={() => onOpenWork()} />
-          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">{categories.map((category) => <CategoryCard key={category.category} {...category} onOpen={() => onOpenWork({ category: category.category })} />)}</div>
-        </div>
-        <div>
-          <SectionHeading eyebrow="Review first" title="Safety findings" action={`See all ${counts.safety_hazard}`} onAction={() => onOpenWork({ severity: "safety_hazard" })} />
-          <div className="mt-4 overflow-hidden rounded-[24px] border border-black/6 bg-[var(--paper)] surface-shadow">{safetyItems.map((item, index) => <CompactFinding key={item.reportId} item={item} last={index === safetyItems.length - 1} onOpen={() => onOpenWork({ severity: "safety_hazard", selectedReportId: item.reportId })} />)}</div>
-        </div>
+      <section className="mt-8">
+        <SectionHeading eyebrow="Organize by system" title="Where the work lives" action="All categories" onAction={() => onOpenWork()} />
+        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">{categories.map((category) => <CategoryCard key={category.category} {...category} onOpen={() => onOpenWork({ category: category.category })} />)}</div>
       </section>
       {showReviewOptions ? <InspectionReviewOptionsDialog remaining={inspectionReview.remaining} onClose={() => setShowReviewOptions(false)} onAccept={onAcceptInspectionReview} /> : null}
     </div>
@@ -404,6 +421,36 @@ function SummaryCard({ label, value, note, icon: Icon, tone }: { label: string; 
   return <article className={`enter min-h-32 rounded-[22px] p-4 surface-shadow sm:min-h-36 sm:p-5 ${tones[tone]}`}><div className="flex items-start justify-between gap-2"><div className="text-xs font-extrabold uppercase tracking-[0.1em] opacity-65">{label}</div><Icon className="size-[18px] opacity-70" /></div><div className="font-display mt-3 text-4xl font-extrabold tracking-[-0.06em] sm:text-5xl">{value}</div><div className="mt-1 text-[11px] font-bold opacity-60 sm:text-xs">{note}</div></article>;
 }
 
+function formatPriorityDate(date: string) {
+  const [year, month, day] = date.split("-").map(Number);
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${months[month - 1]} ${day}, ${year}`;
+}
+
+function PriorityFindingCard({ item, status, onOpen }: { item: PrioritizedFinding; status: ReviewStatus; onOpen: () => void }) {
+  const tones: Record<PrioritizedFinding["reason"], string> = {
+    Overdue: "bg-[#f8ddd7] text-[#8c3328]",
+    Emergency: "bg-[#f3cbc3] text-[#7e271e]",
+    Safety: "bg-[#f8ddd7] text-[#8c3328]",
+    Urgent: "bg-[#f9e6c8] text-[#84581b]",
+    "Due soon": "bg-[var(--mint)] text-[var(--forest)]",
+    Important: "bg-black/5 text-[var(--muted)]",
+  };
+  const finding = item.finding;
+  return <button type="button" onClick={onOpen} className="group flex min-h-48 w-full flex-col rounded-[22px] border border-black/6 bg-[var(--paper)] p-5 text-left transition hover:-translate-y-0.5 hover:border-[var(--forest)]/20 surface-shadow" aria-label={`Open priority: ${finding.title}`}>
+    <div className="flex items-start justify-between gap-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-[0.08em] ${tones[item.reason]}`}>{item.reason}</span>
+        <ReviewStatusPill status={status} />
+      </div>
+      <ArrowRight className="mt-1 size-4 shrink-0 text-[var(--muted)] transition group-hover:translate-x-0.5 group-hover:text-[var(--forest)]" />
+    </div>
+    <h3 className="mt-4 text-base font-extrabold leading-5 group-hover:text-[var(--forest)]">{finding.title}</h3>
+    <p className="mt-2 text-xs leading-5 text-[var(--muted)]">{finding.propertyName ? `${finding.propertyName} · ` : ""}{finding.category}{finding.area ? ` · ${finding.area}` : ""}</p>
+    <div className="mt-auto pt-5 text-xs font-bold text-[var(--muted)]">{item.targetDate ? `${item.reason === "Overdue" ? "Was due" : "Target"} ${formatPriorityDate(item.targetDate)}` : item.reason === "Safety" ? "Flagged as a safety finding" : `${item.reason} priority`}</div>
+  </button>;
+}
+
 function SectionHeading({ eyebrow, title, action, onAction }: { eyebrow: string; title: string; action: string; onAction: () => void }) {
   return <div className="flex items-end justify-between gap-4"><div><p className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-[var(--forest)]">{eyebrow}</p><h2 className="font-display mt-1 text-xl font-extrabold tracking-[-0.035em] sm:text-2xl">{title}</h2></div><button type="button" onClick={onAction} className="text-xs font-extrabold text-[var(--forest)] hover:underline">{action}</button></div>;
 }
@@ -411,10 +458,6 @@ function SectionHeading({ eyebrow, title, action, onAction }: { eyebrow: string;
 function CategoryCard({ category, count, urgent, onOpen }: { category: string; count: number; urgent: number; onOpen: () => void }) {
   const Icon = iconByCategory[category] ?? Wrench;
   return <button type="button" onClick={onOpen} className="group w-full rounded-[20px] border border-black/6 bg-[var(--paper)] p-4 text-left transition hover:-translate-y-0.5 hover:border-[var(--forest)]/20 surface-shadow" aria-label={`View ${category} work`}><div className="flex items-start justify-between"><div className="grid size-9 place-items-center rounded-xl bg-[var(--mint)] text-[var(--forest)]"><Icon className="size-[18px]" /></div>{urgent ? <span className="rounded-full bg-[#f8ddd7] px-2 py-1 text-[10px] font-extrabold text-[#8c3328]">{urgent} urgent</span> : null}</div><h3 className="mt-4 min-h-9 text-sm font-extrabold leading-tight group-hover:text-[var(--forest)]">{category}</h3><p className="mt-2 flex items-center justify-between text-xs font-bold text-[var(--muted)]"><span>{count} {count === 1 ? "item" : "items"}</span><ArrowRight className="size-4 transition group-hover:translate-x-0.5" /></p></button>;
-}
-
-function CompactFinding({ item, last, onOpen }: { item: Finding; last: boolean; onOpen: () => void }) {
-  return <button type="button" onClick={onOpen} className={`group flex w-full gap-3 p-4 text-left transition hover:bg-[var(--mint)]/35 sm:p-5 ${last ? "" : "border-b border-black/6"}`} aria-label={`Open ${item.title}`}><div className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-xl bg-[#f8ddd7] text-[#a33e32]"><AlertTriangle className="size-[17px]" /></div><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-2"><h3 className="text-sm font-extrabold leading-5 group-hover:text-[var(--forest)]">{item.title}</h3><ArrowRight className="size-4 shrink-0 text-[var(--muted)] transition group-hover:translate-x-0.5 group-hover:text-[var(--forest)]" /></div><p className="mt-1 truncate text-xs text-[var(--muted)]">{item.location}</p><div className="mt-2 flex items-center gap-2 text-[10px] font-extrabold uppercase tracking-[0.08em] text-[var(--muted)]"><Camera className="size-3" /> {formatSourcePages(item.sourcePages)}</div></div></button>;
 }
 
 function WorkView({ findings, calendarProperty, initialCategory, initialSeverity, initialSelectedReportId, guidedReview, reviewStatuses, reviewActivities, serviceRecords, onRecordReview, onCompleteWork, onAttachDocument }: { findings: Finding[]; calendarProperty: CalendarProperty; initialCategory: string; initialSeverity: Severity | "all"; initialSelectedReportId: string | null; guidedReview: boolean; reviewStatuses: Record<string, ReviewStatus>; reviewActivities: ReviewActivity[]; serviceRecords: ServiceRecord[]; onRecordReview: (reportId: string, status: ReviewStatus, note: string) => Promise<void>; onCompleteWork: (reportId: string, details: CompletionDetails) => Promise<unknown>; onAttachDocument: (item: Finding) => void }) {
