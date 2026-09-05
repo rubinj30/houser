@@ -22,6 +22,8 @@ type WorkItemContext = {
   updatedAt: string;
 };
 
+type LinkableWorkItem = Pick<WorkItemContext, "id" | "propertyId" | "title">;
+
 export type HouserContext = {
   userId: string;
   snapshot: HouserChatSnapshot;
@@ -43,6 +45,42 @@ type AskHouserDependencies = {
   retrieveContext: (question: string) => Promise<HouserContext | null>;
   askModel: (input: { messages: ChatMessages; snapshot: HouserChatSnapshot; userId: string }) => Promise<HouserChatResponse>;
 };
+
+function escapeMarkdownLinkLabel(value: string) {
+  return value.replaceAll("\\", "\\\\").replaceAll("[", "\\[").replaceAll("]", "\\]");
+}
+
+export function linkWorkItemReferences(answer: string, workItems: LinkableWorkItem[]) {
+  const matches = workItems.flatMap((item) => {
+    const found: Array<{ start: number; end: number; item: LinkableWorkItem }> = [];
+    let offset = 0;
+    while (offset < answer.length) {
+      const start = answer.indexOf(item.title, offset);
+      if (start === -1) break;
+      found.push({ start, end: start + item.title.length, item });
+      offset = start + item.title.length;
+    }
+    return found;
+  }).sort((a, b) => a.start - b.start || b.end - b.start - (a.end - a.start));
+
+  const accepted: typeof matches = [];
+  let cursor = 0;
+  for (const match of matches) {
+    if (match.start < cursor) continue;
+    accepted.push(match);
+    cursor = match.end;
+  }
+  if (!accepted.length) return answer;
+
+  let linked = "";
+  cursor = 0;
+  for (const match of accepted) {
+    const href = `/?property=${encodeURIComponent(match.item.propertyId)}&work=${encodeURIComponent(match.item.id)}`;
+    linked += `${answer.slice(cursor, match.start)}[${escapeMarkdownLinkLabel(match.item.title)}](${href})`;
+    cursor = match.end;
+  }
+  return linked + answer.slice(cursor);
+}
 
 async function askOpenAI({ messages, snapshot, userId }: Parameters<AskHouserDependencies["askModel"]>[0]) {
   if (!process.env.OPENAI_API_KEY) throw new AskHouserConfigurationError("Ask Houser is not configured.");
@@ -108,5 +146,5 @@ export async function answerHouserQuestion(messages: ChatMessages, dependencies:
     return item?.updatedAt === action.expectedUpdatedAt ? action : null;
   })();
 
-  return { answer: answer.answer, confidence: answer.confidence, relatedWorkItems, proposedAction };
+  return { answer: linkWorkItemReferences(answer.answer, relatedWorkItems), confidence: answer.confidence, relatedWorkItems, proposedAction };
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { answerHouserQuestion, AskHouserAuthenticationError, type HouserContext } from "./ask-houser";
+import { answerHouserQuestion, AskHouserAuthenticationError, linkWorkItemReferences, type HouserContext } from "./ask-houser";
 
 const workItemId = "11111111-1111-4111-8111-111111111111";
 const propertyId = "22222222-2222-4222-8222-222222222222";
@@ -25,7 +25,7 @@ describe("answerHouserQuestion", () => {
   it("retrieves relevant context and exposes only known related work", async () => {
     const retrieveContext = vi.fn().mockResolvedValue(context);
     const askModel = vi.fn().mockResolvedValue({
-      answer: "The stored analysis notes discoloration; the cause is not established.", confidence: "medium",
+      answer: "Investigate vent staining notes discoloration; the cause is not established.", confidence: "medium",
       relatedWorkItemIds: [workItemId, "33333333-3333-4333-8333-333333333333"], proposedAction: null,
     });
     const result = await answerHouserQuestion(messages, { retrieveContext, askModel });
@@ -33,6 +33,18 @@ describe("answerHouserQuestion", () => {
     expect(askModel).toHaveBeenCalledWith(expect.objectContaining({ messages, snapshot: context.snapshot, userId: context.userId }));
     expect(result.relatedWorkItems).toEqual([expect.objectContaining({ id: workItemId, title: "Investigate vent staining" })]);
     expect(result.relatedWorkItems[0]).not.toHaveProperty("updatedAt");
+    expect(result.answer).toBe(`[Investigate vent staining](/?property=${propertyId}&work=${workItemId}) notes discoloration; the cause is not established.`);
+  });
+
+  it("links every verified title reference without nesting overlapping titles", () => {
+    const items = [
+      { id: workItemId, propertyId, title: "Deck staining" },
+      { id: "33333333-3333-4333-8333-333333333333", propertyId, title: "Deck" },
+    ];
+
+    expect(linkWorkItemReferences("Deck staining should happen before Deck repairs.", items)).toBe(
+      `[Deck staining](/?property=${propertyId}&work=${workItemId}) should happen before [Deck](/?property=${propertyId}&work=33333333-3333-4333-8333-333333333333) repairs.`,
+    );
   });
 
   it("keeps a current update proposal for owner confirmation", async () => {

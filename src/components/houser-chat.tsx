@@ -1,22 +1,15 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, CheckCircle2, Circle, LoaderCircle, PencilLine, PlusCircle, Send, ShieldCheck, Sparkles, Wrench, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, CheckCircle2, Circle, LoaderCircle, PencilLine, PlusCircle, Send, ShieldCheck, Sparkles, X } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { MessageResponse } from "@/components/ai-elements/message";
 import type { HouserChatAction } from "@/lib/houser-chat";
 
 type RelatedWorkItem = {
   id: string;
   propertyId: string;
-  reference: string;
   title: string;
-  property: string;
-  category: string | null;
-  status: string;
-  priority: string;
-  targetStartOn: string | null;
-  targetEndOn: string | null;
 };
 
 type ChatMessage = {
@@ -36,14 +29,6 @@ type ChatError = {
   actionUrl?: string;
 };
 
-function formatTarget(item: RelatedWorkItem) {
-  if (!item.targetStartOn) return "Unscheduled";
-  const start = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date(`${item.targetStartOn}T12:00:00`));
-  if (!item.targetEndOn || item.targetEndOn === item.targetStartOn) return start;
-  const end = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date(`${item.targetEndOn}T12:00:00`));
-  return `${start} – ${end}`;
-}
-
 function proposedActionTitle(action: HouserChatAction) {
   if (action.type === "create_property") return "Create property";
   return action.type === "create_work_item" ? "Create work item" : "Update work item";
@@ -53,6 +38,24 @@ function proposedActionDetails(action: HouserChatAction) {
   if (action.type !== "create_property") return null;
   const location = [action.addressLine1, action.city, action.region, action.postalCode].filter(Boolean).join(", ");
   return `${action.displayName} · ${action.propertyType.replaceAll("_", " ")}${location ? ` · ${location}` : ""}`;
+}
+
+const VerifiedWorkLinksContext = createContext<ReadonlySet<string>>(new Set());
+
+function ChatAnswerLink(props: React.ComponentProps<"a"> & { node?: unknown }) {
+  const { href, children } = props;
+  const verifiedWorkLinks = useContext(VerifiedWorkLinksContext);
+  if (typeof href !== "string" || !verifiedWorkLinks.has(href)) return <span>{children}</span>;
+  return <Link href={href} className="font-extrabold text-[var(--forest)] underline decoration-[var(--forest)]/35 decoration-2 underline-offset-2 hover:decoration-[var(--forest)]">{children}</Link>;
+}
+
+const chatAnswerComponents = { a: ChatAnswerLink };
+
+function ChatAnswer({ content, relatedWorkItems = [] }: { content: string; relatedWorkItems?: RelatedWorkItem[] }) {
+  const verifiedWorkLinks = useMemo(() => new Set(relatedWorkItems.map((item) => `/?property=${encodeURIComponent(item.propertyId)}&work=${encodeURIComponent(item.id)}`)), [relatedWorkItems]);
+  return <VerifiedWorkLinksContext.Provider value={verifiedWorkLinks}>
+    <MessageResponse components={chatAnswerComponents} className="text-sm leading-6 [&_li]:my-1 [&_ol]:my-3 [&_p]:my-2 [&_ul]:my-3">{content}</MessageResponse>
+  </VerifiedWorkLinksContext.Provider>;
 }
 
 export function HouserChat({ userEmail, propertyName }: { userEmail: string; propertyName: string }) {
@@ -159,8 +162,7 @@ export function HouserChat({ userEmail, propertyName }: { userEmail: string; pro
         {messages.length === 0 ? <section className="mx-auto flex max-w-2xl flex-col items-center px-4 pb-10 pt-[12vh] text-center"><div className="grid size-16 place-items-center rounded-[22px] bg-[var(--forest)] text-[var(--lime)] shadow-xl shadow-[#214f3e]/15"><Sparkles className="size-7"/></div><p className="mt-6 text-[10px] font-extrabold uppercase tracking-[0.18em] text-[var(--forest)]">Grounded in your Houser records</p><h2 className="font-display mt-3 text-3xl font-extrabold tracking-[-0.05em] sm:text-5xl">What would you like to know?</h2><p className="mt-4 max-w-xl text-sm leading-6 text-[var(--muted)] sm:text-base">Ask naturally about maintenance, open work, service history, assets, or Documents. If you request a change, Houser will always show it for approval first.</p></section> : null}
         {messages.map((message) => <article key={message.id} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
           <div className={`max-w-[min(92%,46rem)] ${message.role === "user" ? "rounded-[24px] rounded-br-lg bg-[var(--forest)] px-4 py-3.5 text-white shadow-lg shadow-[#214f3e]/10 sm:px-5" : "min-w-0"}`}>
-            {message.role === "assistant" ? <div className="rounded-[24px] rounded-tl-lg border border-black/6 bg-[rgba(252,251,248,0.92)] p-4 surface-shadow sm:p-6"><div className="mb-3 flex items-center gap-2 text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--forest)]"><span className="grid size-6 place-items-center rounded-lg bg-[var(--mint)]"><Sparkles className="size-3.5"/></span> Houser</div><MessageResponse className="text-sm leading-6 [&_li]:my-1 [&_ol]:my-3 [&_p]:my-2 [&_ul]:my-3">{message.content}</MessageResponse>{message.confidence ? <p className="mt-4 flex items-center gap-1.5 border-t border-black/6 pt-3 text-[10px] font-bold capitalize text-[var(--muted)]"><CheckCircle2 className="size-3.5 text-[var(--forest)]"/> {message.confidence} confidence from current records</p> : null}</div> : <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>}
-            {message.relatedWorkItems?.length ? <div className="mt-3 space-y-2"><p className="px-1 text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--muted)]">Related work</p>{message.relatedWorkItems.map((item) => <Link key={item.id} href={`/?property=${encodeURIComponent(item.propertyId)}&work=${encodeURIComponent(item.id)}`} className="group flex items-center justify-between gap-3 rounded-[18px] border border-black/7 bg-white p-3.5 surface-shadow hover:border-[var(--forest)]/25"><div className="flex min-w-0 items-center gap-3"><div className="grid size-9 shrink-0 place-items-center rounded-xl bg-[var(--mint)] text-[var(--forest)]"><Wrench className="size-4"/></div><div className="min-w-0"><p className="truncate text-xs font-extrabold">{item.title}</p><p className="mt-1 truncate text-[10px] capitalize text-[var(--muted)]">{item.property} · {item.category ?? "General"} · {item.priority} · {formatTarget(item)}</p></div></div><ArrowRight className="size-4 shrink-0 text-[var(--muted)] transition group-hover:translate-x-0.5 group-hover:text-[var(--forest)]"/></Link>)}</div> : null}
+            {message.role === "assistant" ? <div className="rounded-[24px] rounded-tl-lg border border-black/6 bg-[rgba(252,251,248,0.92)] p-4 surface-shadow sm:p-6"><div className="mb-3 flex items-center gap-2 text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--forest)]"><span className="grid size-6 place-items-center rounded-lg bg-[var(--mint)]"><Sparkles className="size-3.5"/></span> Houser</div><ChatAnswer content={message.content} relatedWorkItems={message.relatedWorkItems}/>{message.confidence ? <p className="mt-4 flex items-center gap-1.5 border-t border-black/6 pt-3 text-[10px] font-bold capitalize text-[var(--muted)]"><CheckCircle2 className="size-3.5 text-[var(--forest)]"/> {message.confidence} confidence from current records</p> : null}</div> : <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>}
             {message.proposedAction ? <section className="mt-3 rounded-[18px] border border-[var(--forest)]/20 bg-[var(--mint)]/45 p-4" aria-label="Proposed Houser change"><div className="flex items-start gap-3"><div className="grid size-9 shrink-0 place-items-center rounded-xl bg-[var(--forest)] text-white">{message.proposedAction.type === "update_work_item" ? <PencilLine className="size-4"/> : <PlusCircle className="size-4"/>}</div><div className="min-w-0"><p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--forest)]">Review before saving</p><h2 className="mt-1 text-sm font-extrabold">{proposedActionTitle(message.proposedAction)}</h2><p className="mt-1 text-xs leading-5 text-[var(--muted)]">{message.proposedAction.summary}</p>{proposedActionDetails(message.proposedAction) ? <p className="mt-2 text-xs font-extrabold capitalize text-[var(--ink)]">{proposedActionDetails(message.proposedAction)}</p> : null}</div></div>{message.actionError ? <p role="alert" className="mt-3 rounded-xl bg-[#f8ddd7] px-3 py-2 text-xs font-bold text-[#8c3328]">{message.actionError}</p> : null}<div className="mt-4 grid grid-cols-2 gap-2"><button type="button" onClick={() => dismissAction(message.id)} disabled={message.actionApplying} className="flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-black/10 bg-white text-xs font-extrabold disabled:opacity-40"><X className="size-3.5"/> Not now</button><button type="button" onClick={() => void applyAction(message.id, message.proposedAction!)} disabled={message.actionApplying} className="flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-[var(--forest)] px-3 text-xs font-extrabold text-white disabled:opacity-50">{message.actionApplying ? <LoaderCircle className="size-4 animate-spin"/> : <CheckCircle2 className="size-4"/>}{message.actionApplying ? "Saving…" : "Confirm & save"}</button></div></section> : null}
             {message.actionResult ? <Link href={message.actionResult.href} className="mt-3 flex items-center justify-between gap-3 rounded-[18px] border border-[var(--forest)]/15 bg-white p-3.5 text-[var(--forest)] surface-shadow"><div><p className="text-[10px] font-extrabold uppercase tracking-[0.12em]">{message.actionResult.kind === "property" ? "Property saved" : "Work saved"}</p><p className="mt-1 text-xs font-extrabold text-[var(--ink)]">{message.actionResult.title}</p></div><ArrowRight className="size-4"/></Link> : null}
           </div>
