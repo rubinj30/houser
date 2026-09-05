@@ -121,6 +121,37 @@ test.describe("Work planning critical paths", () => {
     await expect(review.getByText("Still needs work", { exact: true }).first()).toBeVisible();
   });
 
+  test("a work item can choose an attachment from Photos or Camera", async ({ page }, testInfo) => {
+    const title = `E2E attach chimney photo ${testInfo.project.name} ${Date.now()}`;
+    const card = await createWorkItem(page, title, "Attach a photographed service report to this work item.");
+    await card.getByRole("heading", { name: title, exact: true }).click();
+
+    const workDialog = page.getByRole("dialog", { name: title });
+    await workDialog.getByRole("button", { name: "Add file" }).click();
+    const uploadDialog = page.getByRole("dialog", { name: "Attach a file" });
+    await expect(uploadDialog).toContainText(`Attaching to: ${title}`);
+    await expect(uploadDialog.getByRole("button", { name: "Files", exact: true })).toBeVisible();
+    await expect(uploadDialog.getByRole("button", { name: "Photos", exact: true })).toBeVisible();
+    await expect(uploadDialog.getByRole("button", { name: "Camera", exact: true })).toBeVisible();
+    await expect(uploadDialog.getByLabel("Choose attachment from Photos")).toHaveAttribute("accept", "image/*");
+    await expect(uploadDialog.getByLabel("Take a photo with Camera")).toHaveAttribute("capture", "environment");
+
+    await uploadDialog.getByLabel("Choose attachment from Photos").setInputFiles({
+      name: "chimney-service-report.jpg",
+      mimeType: "image/jpeg",
+      buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
+    });
+    await expect(uploadDialog.getByLabel("Attachment type")).toHaveValue("photo");
+    await expect(uploadDialog.getByText("chimney-service-report.jpg", { exact: true })).toBeVisible();
+    await expect(uploadDialog.getByRole("button", { name: "Upload & analyze with OpenAI" })).toBeEnabled();
+
+    await uploadDialog.getByRole("button", { name: "Close" }).click();
+    await workDialog.getByRole("button", { name: "Not applicable" }).click();
+    await workDialog.getByLabel(/Why doesn't this apply/).fill("Created only to verify the mobile photo attachment picker.");
+    await workDialog.getByRole("button", { name: "Save update" }).click();
+    await expect(workDialog).toBeHidden();
+  });
+
   test("guided inspection review advances through each pending finding", async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== "desktop-chromium", "The guided flow is covered once; status controls already run at 360px.");
     const seeded = await seedInspectionReview();
