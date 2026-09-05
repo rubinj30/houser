@@ -1,0 +1,29 @@
+{
+  "name": "houser",
+  "version": "0.1.0",
+  "description": "Securely find and manage home-maintenance records from ChatGPT and Codex.",
+  "author": {
+    "name": "Jonathan Rubin",
+    "url": "https://github.com/rubinj30/houser"
+  },
+  "homepage": "https://houser-flax.vercel.app/docs/agent-access",
+  "repository": "https://github.com/rubinj30/houser",
+  "keywords": ["home", "maintenance", "property", "mcp"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Houser",
+    "shortDescription": "Ask about and manage your home records.",
+    "longDescription": "Connect ChatGPT or Codex to your private Houser workspace to search properties and Work items and make confirmed updates.",
+    "developerName": "Jonathan Rubin",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "websiteURL": "https://houser-flax.vercel.app/docs/agent-access",
+    "defaultPrompt": [
+      "What home maintenance needs my attention?",
+      "Find my open HVAC work.",
+      "Help me add a new Work item."
+    ],
+    "brandColor": "#214F3E"
+  },
+  "mcpServers": "./.mcp.json"
+}

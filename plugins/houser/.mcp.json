@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "houser": {
+      "type": "http",
+      "url": "https://houser-flax.vercel.app/api/mcp"
+    }
+  }
+}

@@ -7,7 +7,7 @@ import { requestAccountCreationAction, requestMagicLinkAction } from "@/app/acti
 import { browserSupportsPasskeys, passkeyErrorMessage, subscribeToPasskeySupport } from "@/lib/passkeys";
 import { createClient } from "@/lib/supabase/client";
 
-export function AuthScreen({ authError = false, invitationError = false }: { authError?: boolean; invitationError?: boolean }) {
+export function AuthScreen({ authError = false, invitationError = false, returnTo = "/" }: { authError?: boolean; invitationError?: boolean; returnTo?: string }) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [isSending, setIsSending] = useState(false);
@@ -26,7 +26,7 @@ export function AuthScreen({ authError = false, invitationError = false }: { aut
         setError(passkeyErrorMessage(passkeyError, "sign-in"));
         return;
       }
-      router.replace("/");
+      router.replace(returnTo);
       router.refresh();
     } catch (passkeyError) {
       setError(passkeyErrorMessage(passkeyError, "sign-in"));
@@ -42,7 +42,7 @@ export function AuthScreen({ authError = false, invitationError = false }: { aut
     setIsSending(true);
     setError("");
     try {
-      await (mode === "signup" ? requestAccountCreationAction({ email: normalizedEmail }) : requestMagicLinkAction({ email: normalizedEmail }));
+      await (mode === "signup" ? requestAccountCreationAction({ email: normalizedEmail, next: returnTo }) : requestMagicLinkAction({ email: normalizedEmail, next: returnTo }));
       setSentTo(normalizedEmail);
     } catch (signInError) {
       setError(signInError instanceof Error ? signInError.message : "The sign-in link could not be sent.");

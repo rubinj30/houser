@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, Check, ChevronDown, Home, LoaderCircle, Mail, Plus, ShieldCheck, Trash2, UserPlus, Users, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Bot, Check, ChevronDown, Home, LoaderCircle, Mail, Plus, ShieldCheck, Trash2, UserPlus, Users, X } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import {
@@ -133,6 +133,10 @@ export function HouseholdSettingsView({ household, initiallyAddingProperty = fal
 
       <aside className="space-y-5">
         <PasskeySettings />
+        <section className="rounded-[26px] border border-black/7 bg-[var(--paper)] p-5 surface-shadow sm:p-6">
+          <div className="flex items-start gap-3"><span className="grid size-10 shrink-0 place-items-center rounded-xl bg-[var(--mint)] text-[var(--forest)]"><Bot className="size-5" /></span><div><h2 className="font-display text-lg font-extrabold">Agent connections</h2><p className="mt-2 text-xs leading-5 text-[var(--muted)]">Connect ChatGPT or Codex to Houser, and revoke access whenever you choose.</p></div></div>
+          <Link href="/connections" className="mt-4 flex min-h-11 w-full items-center justify-between rounded-xl border border-[var(--forest)]/20 bg-white px-4 text-xs font-extrabold text-[var(--forest)]">Manage connections <ArrowRight className="size-4" /></Link>
+        </section>
         <section className="rounded-[26px] border border-black/7 bg-[var(--paper)] p-5 surface-shadow sm:p-6">
           <div className="flex items-center gap-3"><Home className="size-5 shrink-0 text-[var(--forest)]"/><h2 className="font-display text-lg font-extrabold">Shared properties</h2></div>
           <div className="mt-4 space-y-2">{household.properties.map((property) => <Link key={property.id} href={`/?property=${encodeURIComponent(property.id)}`} className="group flex items-center justify-between gap-3 rounded-2xl bg-[var(--mint)]/45 p-4 transition hover:bg-[var(--mint)]/70"><div><p className="text-sm font-extrabold">{property.displayName}</p><p className="mt-1 text-[10px] font-bold capitalize text-[var(--muted)]">{property.propertyType.replaceAll("_", " ")}</p></div><ArrowRight className="size-4 text-[var(--forest)] transition group-hover:translate-x-0.5"/></Link>)}</div>

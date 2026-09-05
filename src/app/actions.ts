@@ -66,7 +66,10 @@ const completionSchema = z.object({
   }
 });
 
-const magicLinkSchema = z.object({ email: z.string().trim().pipe(z.email()) });
+const magicLinkSchema = z.object({
+  email: z.string().trim().pipe(z.email()),
+  next: z.string().max(1000).optional(),
+});
 const initialWorkspaceSchema = z.object({
   displayName: z.string().trim().min(1).max(120),
   propertyType: z.enum(["primary_residence", "rental", "vacation_home", "other"]),
@@ -79,8 +82,12 @@ async function requireUser() {
   return { supabase, userId: data.claims.sub };
 }
 
-export async function requestMagicLinkAction(input: { email: string }) {
-  const { email } = magicLinkSchema.parse(input);
+function safeAuthNext(value?: string) {
+  return value?.startsWith("/") && !value.startsWith("//") ? value : "/";
+}
+
+export async function requestMagicLinkAction(input: { email: string; next?: string }) {
+  const { email, next } = magicLinkSchema.parse(input);
   const normalizedEmail = email.toLowerCase();
   const allowedEmails = (process.env.HOUSER_ALLOWED_EMAILS ?? "")
     .split(",")
@@ -104,7 +111,7 @@ export async function requestMagicLinkAction(input: { email: string }) {
   const { error } = await supabase.auth.signInWithOtp({
     email: normalizedEmail,
     options: {
-      emailRedirectTo: `${siteUrl.replace(/\/$/, "")}/auth/confirm?next=/`,
+      emailRedirectTo: `${siteUrl.replace(/\/$/, "")}/auth/confirm?next=${encodeURIComponent(safeAuthNext(next))}`,
       shouldCreateUser: true,
     },
   });
@@ -112,8 +119,8 @@ export async function requestMagicLinkAction(input: { email: string }) {
   return { sent: true };
 }
 
-export async function requestAccountCreationAction(input: { email: string }) {
-  const { email } = magicLinkSchema.parse(input);
+export async function requestAccountCreationAction(input: { email: string; next?: string }) {
+  const { email, next } = magicLinkSchema.parse(input);
   const normalizedEmail = email.toLowerCase();
   const requestHeaders = await headers();
   const requestOrigin = requestHeaders.get("origin");
@@ -123,7 +130,7 @@ export async function requestAccountCreationAction(input: { email: string }) {
   const { error } = await supabase.auth.signInWithOtp({
     email: normalizedEmail,
     options: {
-      emailRedirectTo: `${siteUrl.replace(/\/$/, "")}/auth/confirm?next=${encodeURIComponent("/?welcome=1")}`,
+      emailRedirectTo: `${siteUrl.replace(/\/$/, "")}/auth/confirm?next=${encodeURIComponent(next ? safeAuthNext(next) : "/?welcome=1")}`,
       shouldCreateUser: true,
     },
   });
