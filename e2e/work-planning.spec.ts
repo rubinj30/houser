@@ -152,6 +152,34 @@ test.describe("Work planning critical paths", () => {
     await expect(workDialog).toBeHidden();
   });
 
+  test("status updates offer relevant evidence without losing the draft", async ({ page }, testInfo) => {
+    const title = `E2E status evidence ${testInfo.project.name} ${Date.now()}`;
+    const draftNote = "Current condition confirmed; attach a photo before saving this update.";
+    const card = await createWorkItem(page, title, "Verify status-adjacent evidence controls.");
+    await card.getByRole("heading", { name: title, exact: true }).click();
+
+    const workDialog = page.getByRole("dialog", { name: title });
+    await workDialog.getByRole("button", { name: "Still needs work" }).click();
+    await workDialog.getByLabel("What did you observe?").fill(draftNote);
+    await workDialog.getByRole("button", { name: "Add current photo or quote" }).click();
+
+    const uploadDialog = page.getByRole("dialog", { name: "Attach a file" });
+    await expect(uploadDialog).toContainText(`Attaching to: ${title}`);
+    await uploadDialog.getByRole("button", { name: "Close" }).click();
+    await expect(workDialog.getByLabel("What did you observe?")).toHaveValue(draftNote);
+
+    await workDialog.getByRole("button", { name: "Cancel" }).click();
+    await workDialog.getByRole("button", { name: "Already completed" }).click();
+    await expect(workDialog.getByRole("button", { name: "Add receipt, invoice, or after photo" })).toBeVisible();
+    await workDialog.getByRole("button", { name: "Cancel" }).click();
+
+    await workDialog.getByRole("button", { name: "Not applicable" }).click();
+    await expect(workDialog.getByRole("button", { name: /Add supporting file/ })).toHaveCount(0);
+    await workDialog.getByLabel(/Why doesn't this apply/).fill("Created only to verify evidence controls in status workflows.");
+    await workDialog.getByRole("button", { name: "Save update" }).click();
+    await expect(workDialog).toBeHidden();
+  });
+
   test("guided inspection review advances through each pending finding", async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== "desktop-chromium", "The guided flow is covered once; status controls already run at 360px.");
     const seeded = await seedInspectionReview();
