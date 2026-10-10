@@ -8,7 +8,7 @@ import { isHouserEmailAllowed } from "@/lib/supabase/admin";
 import { createHouseholdProperty } from "@/lib/property-mutations";
 import { createClient } from "@/lib/supabase/server";
 import type { InspectionEvidence, LinkedWorkDocument, LocalWorkItem, ReviewActivity, ReviewStatus, WorkCompletionInput, WorkCompletionResult } from "@/lib/types";
-import { acceptRemainingInspectionFindings, completePlannedWorkItem, createManualWorkItem, linkDocumentToWorkItem, recordWorkItemReview } from "@/lib/work-planning";
+import { acceptRemainingInspectionFindings, completePlannedWorkItem, createManualWorkItem, linkDocumentToWorkItem, recordWorkItemReview, updateWorkItemDetails } from "@/lib/work-planning";
 
 const reviewUpdateSchema = z.object({
   workItemId: z.uuid(),
@@ -26,9 +26,13 @@ const inspectionReviewSchema = z.object({
 const manualWorkSchema = z.object({
   propertyId: z.uuid(),
   title: z.string().trim().min(1).max(240),
-  description: z.string().trim().max(5000),
+  description: z.string().trim().min(1, "Add a description before saving.").max(5000),
   category: z.string().trim().min(1).max(100),
   area: z.string().trim().min(1).max(120),
+});
+
+const workItemDetailsSchema = manualWorkSchema.omit({ propertyId: true }).extend({
+  workItemId: z.uuid(),
 });
 
 const documentWorkDestinationSchema = z.discriminatedUnion("destination", [
@@ -266,6 +270,38 @@ export async function createManualWorkItemAction(input: {
   const result = await createManualWorkItem(supabase, values);
   revalidatePath("/");
   return result satisfies LocalWorkItem;
+}
+
+export async function updateWorkItemDetailsAction(input: z.input<typeof workItemDetailsSchema>): Promise<LocalWorkItem> {
+  const values = workItemDetailsSchema.parse(input);
+  const { supabase } = await requireUser();
+  const { data: current, error } = await supabase
+    .from("work_items")
+    .select("updated_at")
+    .eq("id", values.workItemId)
+    .single();
+  if (error) throw new Error(error.message);
+  const saved = await updateWorkItemDetails(supabase, {
+    ...values,
+    expectedUpdatedAt: current.updated_at,
+  });
+  revalidatePath("/");
+  return {
+    workItemId: saved.id,
+    propertyId: saved.propertyId,
+    reportId: saved.reference,
+    sourceReference: saved.reference,
+    title: saved.title,
+    category: saved.category ?? values.category,
+    area: saved.area ?? values.area,
+    workType: saved.workType,
+    severity: "recommendation",
+    priority: saved.priority as LocalWorkItem["priority"],
+    location: saved.area ?? values.area,
+    suggestedAction: saved.description ?? values.description,
+    sourcePages: [],
+    isLocal: true,
+  };
 }
 
 export async function saveDocumentWorkDestinationAction(input: z.input<typeof documentWorkDestinationSchema>) {

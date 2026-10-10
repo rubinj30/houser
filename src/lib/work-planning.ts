@@ -89,12 +89,11 @@ export async function createManualWorkItem(
   supabase: SupabaseClient,
   input: { propertyId: string; title: string; description: string; category: string; area: string },
 ): Promise<LocalWorkItem> {
-  const description = input.description || "Review this manually added work item and add scheduling details.";
   const saved = await planWorkItem(supabase, {
     target_property_id: input.propertyId,
     new_source_type: "manual",
     new_title: input.title,
-    new_description: description,
+    new_description: input.description,
     new_category_name: normalizeWorkCategory(input.category),
     new_area_name: input.area,
     new_work_type: "other",
@@ -113,10 +112,33 @@ export async function createManualWorkItem(
     severity: "recommendation",
     priority: "routine",
     location: input.area,
-    suggestedAction: description,
+    suggestedAction: saved.description ?? input.description,
     sourcePages: [],
     isLocal: true,
   };
+}
+
+export async function updateWorkItemDetails(
+  supabase: SupabaseClient,
+  input: {
+    workItemId: string;
+    expectedUpdatedAt: string;
+    title: string;
+    description: string;
+    category: string;
+    area: string;
+  },
+): Promise<PlannedWorkItem> {
+  return planWorkItem(supabase, {
+    target_work_item_id: input.workItemId,
+    expected_updated_at: input.expectedUpdatedAt,
+    new_source_type: "manual",
+    new_title: input.title,
+    new_description: input.description,
+    new_category_name: normalizeWorkCategory(input.category),
+    new_area_name: input.area,
+    activity_note: "Updated work item details.",
+  });
 }
 
 export async function createChatWorkItem(

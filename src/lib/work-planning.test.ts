@@ -10,6 +10,7 @@ import {
   normalizeWorkType,
   recordWorkItemReview,
   updateChatWorkItem,
+  updateWorkItemDetails,
 } from "./work-planning";
 
 const propertyId = "22222222-2222-4222-8222-222222222222";
@@ -87,6 +88,25 @@ describe("Work planning", () => {
     });
     expect(client.rpc).toHaveBeenNthCalledWith(1, "plan_work_item", expect.objectContaining({ new_source_type: "chat", new_status: "planned" }));
     expect(client.rpc).toHaveBeenNthCalledWith(2, "plan_work_item", expect.objectContaining({ target_work_item_id: workItemId, expected_updated_at: updatedAt, new_status: "completed" }));
+  });
+
+  it("updates owner-edited details through the concurrency-safe planning interface", async () => {
+    const client = rpcClient();
+    await updateWorkItemDetails(client as never, {
+      workItemId,
+      expectedUpdatedAt: updatedAt,
+      title: "Extend rear downspouts",
+      description: "Carry runoff beyond the foundation beds.",
+      category: "Exterior",
+      area: "Rear exterior",
+    });
+    expect(client.rpc).toHaveBeenCalledWith("plan_work_item", expect.objectContaining({
+      target_work_item_id: workItemId,
+      expected_updated_at: updatedAt,
+      new_title: "Extend rear downspouts",
+      new_description: "Carry runoff beyond the foundation beds.",
+      activity_note: "Updated work item details.",
+    }));
   });
 
   it("records owner review through the transactional status interface", async () => {

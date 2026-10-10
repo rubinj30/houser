@@ -75,12 +75,17 @@ async function createWorkItem(page: import("@playwright/test").Page, title: stri
 
   const dialog = page.getByRole("dialog", { name: "Add work" });
   await expect(dialog).toBeVisible();
-  await dialog.getByLabel("What needs to be done?").fill(title);
+  await dialog.getByLabel("Title").fill(title);
   await dialog.getByLabel(/Description/).fill(note);
-  await dialog.getByRole("button", { name: "Save to work inbox" }).click();
-  await expect(dialog).toBeHidden();
+  await dialog.getByRole("button", { name: "Review work item" }).click();
+  const reviewDialog = page.getByRole("dialog", { name: "Review work item" });
+  await expect(reviewDialog).toContainText("Nothing has been saved yet");
+  await expect(reviewDialog).toContainText(note);
+  await reviewDialog.getByRole("button", { name: "Create work item" }).click();
 
-  await page.getByRole("button", { name: /^Work(?: \d+)?$/ }).click();
+  const createdDialog = page.getByRole("dialog", { name: title });
+  await expect(createdDialog).toBeVisible();
+  await createdDialog.getByRole("button", { name: "Close review" }).click();
   await page.getByPlaceholder("Search work, areas, or actions").fill(title);
   return page.getByRole("article").filter({ hasText: title });
 }
@@ -106,6 +111,39 @@ test.describe("Work planning critical paths", () => {
     await review.getByRole("button", { name: "Save update" }).click();
     await expect(review).toBeHidden();
     await expect(card).toHaveCount(0);
+  });
+
+  test("quick capture reviews required details and the saved description remains editable", async ({ page }, testInfo) => {
+    const title = `E2E extend downspouts ${testInfo.project.name} ${Date.now()}`;
+    const originalDescription = "Extend the rear downspouts beyond the foundation planting bed.";
+    const updatedDescription = "Extend both rear downspouts at least six feet beyond the foundation planting bed.";
+
+    await page.goto("/");
+    await page.getByRole("button", { name: "Add work", exact: true }).click();
+    const createDialog = page.getByRole("dialog", { name: "Add work" });
+    await createDialog.getByLabel("Title").fill(title);
+    await createDialog.getByRole("button", { name: "Close" }).click();
+    await expect(createDialog.getByRole("alertdialog", { name: "Discard unsaved work item?" })).toBeVisible();
+    await createDialog.getByRole("button", { name: "Keep editing" }).click();
+    await expect(createDialog.getByLabel("Title")).toHaveValue(title);
+    await expect(createDialog.getByRole("button", { name: "Review work item" })).toBeDisabled();
+    await createDialog.getByLabel("Description").fill(originalDescription);
+    await createDialog.getByRole("button", { name: "Review work item" }).click();
+    const reviewDialog = page.getByRole("dialog", { name: "Review work item" });
+    await expect(reviewDialog.getByText(originalDescription, { exact: true })).toBeVisible();
+    await reviewDialog.getByRole("button", { name: "Create work item" }).click();
+
+    const workDialog = page.getByRole("dialog", { name: title });
+    await expect(workDialog.getByText("Description", { exact: true })).toBeVisible();
+    await workDialog.getByRole("button", { name: "Edit details" }).click();
+    await workDialog.getByLabel("Description").fill(updatedDescription);
+    await workDialog.getByRole("button", { name: "Save details" }).click();
+    await expect(workDialog.getByText(updatedDescription, { exact: true })).toBeVisible();
+
+    await workDialog.getByRole("button", { name: "Not applicable" }).click();
+    await workDialog.getByLabel(/Why doesn't this apply/).fill("Created only to verify editable Work details.");
+    await workDialog.getByRole("button", { name: "Save update" }).click();
+    await expect(workDialog).toBeHidden();
   });
 
   test("an owner review moves Work into the active planned state", async ({ page }, testInfo) => {

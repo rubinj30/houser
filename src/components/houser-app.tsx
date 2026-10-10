@@ -29,6 +29,7 @@ import {
   MessageSquareText,
   MessageCircle,
   Paperclip,
+  Pencil,
   Plus,
   Search,
   Settings,
@@ -43,7 +44,7 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { acceptInspectionReviewAction, completeWorkItemAction, createManualWorkItemAction, getInspectionEvidenceAction, getLinkedWorkDocumentsAction, recordReviewUpdateAction, signOutAction } from "@/app/actions";
+import { acceptInspectionReviewAction, completeWorkItemAction, createManualWorkItemAction, getInspectionEvidenceAction, getLinkedWorkDocumentsAction, recordReviewUpdateAction, signOutAction, updateWorkItemDetailsAction } from "@/app/actions";
 import { DocumentUploadDialog } from "@/components/work-intake/document-upload-dialog";
 import { buildGoogleCalendarUrl, buildIcsCalendar, calendarFilename, type CalendarProperty } from "@/lib/calendar";
 import {
@@ -70,6 +71,7 @@ type WorkIntent = {
   revision: number;
 };
 type CompletionDetails = Omit<WorkCompletionInput, "workItemId" | "reportId">;
+type WorkItemDetails = Pick<Finding, "title" | "category" | "area"> & { description: string };
 type RelatedWorkGroup = {
   group: { id: string; label: string } | null;
   relatedItems: Array<{
@@ -116,11 +118,18 @@ export function HouserApp({ seed, propertyId, selectedPropertyId, properties, us
   const [uploadTarget, setUploadTarget] = useState<Finding | null>(null);
   const [attachmentRevision, setAttachmentRevision] = useState(0);
   const [localItems, setLocalItems] = useState<LocalWorkItem[]>([]);
+  const [findingEdits, setFindingEdits] = useState<Record<string, Partial<Finding>>>({});
   const [reviewStatuses, setReviewStatuses] = useState(initialReviewStatuses);
   const [reviewActivities, setReviewActivities] = useState(initialReviewActivities);
   const [serviceRecords, setServiceRecords] = useState(initialServiceRecords);
   const [workIntent, setWorkIntent] = useState<WorkIntent>({ category: "all", severity: "all", selectedReportId: initialWorkItem?.reportId ?? null, guidedReview: false, revision: 0 });
-  const allFindings = useMemo(() => mergeFindings(localItems, seed.findings), [localItems, seed.findings]);
+  const allFindings = useMemo(
+    () => mergeFindings(localItems, seed.findings).map((finding) => ({
+      ...finding,
+      ...(finding.workItemId ? findingEdits[finding.workItemId] : undefined),
+    })),
+    [findingEdits, localItems, seed.findings],
+  );
   const currentFindings = useMemo(
     () => allFindings.filter((finding) => !isClosedReviewStatus(reviewStatuses[finding.reportId])),
     [allFindings, reviewStatuses],
@@ -151,6 +160,22 @@ export function HouserApp({ seed, propertyId, selectedPropertyId, properties, us
     setReviewActivities((current) => [result.activity, ...current]);
     setServiceRecords((current) => [result.serviceRecord, ...current]);
     return result;
+  };
+
+  const updateWorkItem = async (reportId: string, details: WorkItemDetails) => {
+    const item = allFindings.find((finding) => finding.reportId === reportId);
+    if (!item?.workItemId) throw new Error("This work item has not been connected to the database yet.");
+    const saved = await updateWorkItemDetailsAction({ workItemId: item.workItemId, ...details });
+    const updated: Finding = {
+      ...item,
+      title: saved.title,
+      category: saved.category,
+      area: saved.area,
+      location: saved.location,
+      suggestedAction: saved.suggestedAction,
+    };
+    setFindingEdits((current) => ({ ...current, [item.workItemId!]: updated }));
+    return updated;
   };
 
   const acceptInspectionReview = async (mode: InspectionReviewMode) => {
@@ -197,9 +222,9 @@ export function HouserApp({ seed, propertyId, selectedPropertyId, properties, us
           {activeView === "home" ? (
             <HomeView seed={seed} findings={currentFindings} allFindings={allFindings} reviewStatuses={reviewStatuses} hasInspectionDocument={hasInspectionDocument} canAdd={Boolean(propertyId)} today={today} onOpenWork={openWork} onAcceptInspectionReview={acceptInspectionReview} onUpload={() => { setUploadTarget(null); setIsUploadingInspection(true); }} />
           ) : activeView === "work" ? (
-            <WorkView key={workIntent.revision} findings={allFindings} calendarProperty={calendarProperty} initialCategory={workIntent.category} initialSeverity={workIntent.severity} initialSelectedReportId={workIntent.selectedReportId} guidedReview={workIntent.guidedReview} reviewStatuses={reviewStatuses} reviewActivities={reviewActivities} serviceRecords={serviceRecords} attachmentRevision={attachmentRevision} onRecordReview={recordReviewUpdate} onCompleteWork={completeWorkItem} onAttachDocument={(item) => { setUploadTarget(item); setIsUploadingInspection(true); }} />
+            <WorkView key={workIntent.revision} findings={allFindings} calendarProperty={calendarProperty} initialCategory={workIntent.category} initialSeverity={workIntent.severity} initialSelectedReportId={workIntent.selectedReportId} guidedReview={workIntent.guidedReview} reviewStatuses={reviewStatuses} reviewActivities={reviewActivities} serviceRecords={serviceRecords} attachmentRevision={attachmentRevision} onRecordReview={recordReviewUpdate} onCompleteWork={completeWorkItem} onUpdateDetails={updateWorkItem} onAttachDocument={(item) => { setUploadTarget(item); setIsUploadingInspection(true); }} />
           ) : activeView === "timeline" ? (
-            <TimelineView findings={currentFindings} calendarProperty={calendarProperty} reviewStatuses={reviewStatuses} reviewActivities={reviewActivities} serviceRecords={serviceRecords} attachmentRevision={attachmentRevision} onRecordReview={recordReviewUpdate} onCompleteWork={completeWorkItem} onAttachDocument={(item) => { setUploadTarget(item); setIsUploadingInspection(true); }} />
+            <TimelineView findings={currentFindings} calendarProperty={calendarProperty} reviewStatuses={reviewStatuses} reviewActivities={reviewActivities} serviceRecords={serviceRecords} attachmentRevision={attachmentRevision} onRecordReview={recordReviewUpdate} onCompleteWork={completeWorkItem} onUpdateDetails={updateWorkItem} onAttachDocument={(item) => { setUploadTarget(item); setIsUploadingInspection(true); }} />
           ) : (
             <AssetsView seed={seed} />
           )}
@@ -215,6 +240,7 @@ export function HouserApp({ seed, propertyId, selectedPropertyId, properties, us
             const created = await createManualWorkItemAction({ propertyId, title: item.title, description: item.suggestedAction, category: item.category, area: item.area });
             setLocalItems((items) => [created, ...items]);
             setReviewStatuses((current) => ({ ...current, [created.reportId]: "needs_review" }));
+            openWork({ selectedReportId: created.reportId });
           }}
         />
       ) : null}
@@ -462,7 +488,7 @@ function CategoryCard({ category, count, urgent, onOpen }: { category: string; c
   return <button type="button" onClick={onOpen} className="group w-full rounded-[20px] border border-black/6 bg-[var(--paper)] p-4 text-left transition hover:-translate-y-0.5 hover:border-[var(--forest)]/20 surface-shadow" aria-label={`View ${category} work`}><div className="flex items-start justify-between"><div className="grid size-9 place-items-center rounded-xl bg-[var(--mint)] text-[var(--forest)]"><Icon className="size-[18px]" /></div>{urgent ? <span className="rounded-full bg-[#f8ddd7] px-2 py-1 text-[10px] font-extrabold text-[#8c3328]">{urgent} urgent</span> : null}</div><h3 className="mt-4 min-h-9 text-sm font-extrabold leading-tight group-hover:text-[var(--forest)]">{category}</h3><p className="mt-2 flex items-center justify-between text-xs font-bold text-[var(--muted)]"><span>{count} {count === 1 ? "item" : "items"}</span><ArrowRight className="size-4 transition group-hover:translate-x-0.5" /></p></button>;
 }
 
-function WorkView({ findings, calendarProperty, initialCategory, initialSeverity, initialSelectedReportId, guidedReview, reviewStatuses, reviewActivities, serviceRecords, attachmentRevision, onRecordReview, onCompleteWork, onAttachDocument }: { findings: Finding[]; calendarProperty: CalendarProperty; initialCategory: string; initialSeverity: Severity | "all"; initialSelectedReportId: string | null; guidedReview: boolean; reviewStatuses: Record<string, ReviewStatus>; reviewActivities: ReviewActivity[]; serviceRecords: ServiceRecord[]; attachmentRevision: number; onRecordReview: (reportId: string, status: ReviewStatus, note: string) => Promise<void>; onCompleteWork: (reportId: string, details: CompletionDetails) => Promise<unknown>; onAttachDocument: (item: Finding) => void }) {
+function WorkView({ findings, calendarProperty, initialCategory, initialSeverity, initialSelectedReportId, guidedReview, reviewStatuses, reviewActivities, serviceRecords, attachmentRevision, onRecordReview, onCompleteWork, onUpdateDetails, onAttachDocument }: { findings: Finding[]; calendarProperty: CalendarProperty; initialCategory: string; initialSeverity: Severity | "all"; initialSelectedReportId: string | null; guidedReview: boolean; reviewStatuses: Record<string, ReviewStatus>; reviewActivities: ReviewActivity[]; serviceRecords: ServiceRecord[]; attachmentRevision: number; onRecordReview: (reportId: string, status: ReviewStatus, note: string) => Promise<void>; onCompleteWork: (reportId: string, details: CompletionDetails) => Promise<unknown>; onUpdateDetails: (reportId: string, details: WorkItemDetails) => Promise<Finding>; onAttachDocument: (item: Finding) => void }) {
   const [scope, setScope] = useState<"current" | "history">("current");
   const [query, setQuery] = useState("");
   const [severity, setSeverity] = useState<Severity | "all">(initialSeverity);
@@ -511,7 +537,7 @@ function WorkView({ findings, calendarProperty, initialCategory, initialSeverity
       <div className="mt-2 grid gap-3 xl:grid-cols-2">{filtered.map((item) => <FindingCard key={item.workItemId ?? item.reportId} item={item} status={reviewStatuses[item.reportId] ?? "needs_review"} menuOpen={menuItemId === item.reportId} onOpen={() => { setMenuItemId(null); setRequestedStatus(null); setSelectedItem(item); }} onToggleMenu={() => setMenuItemId((current) => current === item.reportId ? null : item.reportId)} onSetStatus={(status) => { setMenuItemId(null); setRequestedStatus(status); setSelectedItem(item); }} />)}</div>
       {filtered.length === 0 ? <div className="mt-8 rounded-[24px] border border-dashed border-black/15 p-10 text-center"><Search className="mx-auto size-7 text-[var(--muted)]"/><h2 className="font-display mt-3 text-lg font-extrabold">{scope === "history" && historyCount === 0 ? "No closed work yet" : "No matching work"}</h2><p className="mt-1 text-sm text-[var(--muted)]">{scope === "history" && historyCount === 0 ? "Completed and dismissed items will appear here." : "Try another search or clear a filter."}</p></div> : null}
     </div>
-    {selectedItem ? <FindingReviewDialog key={`${selectedItem.reportId}-${requestedStatus ?? "details"}`} item={selectedItem} findings={findings} calendarProperty={calendarProperty} status={reviewStatuses[selectedItem.reportId] ?? "needs_review"} activities={reviewActivities.filter((activity) => activity.reportId === selectedItem.reportId)} serviceRecords={serviceRecords.filter((record) => record.reportId === selectedItem.reportId)} initialStatus={requestedStatus} guidedPosition={guidedReview ? { current: Math.max(1, inspectionFindingCount - guidedQueue.length + 1), total: inspectionFindingCount } : null} attachmentRevision={attachmentRevision} onSaved={guidedReview ? () => advanceGuidedReview(selectedItem.reportId) : undefined} onClose={() => { setSelectedItem(null); setRequestedStatus(null); }} onOpenRelated={(workItemId) => { const relatedItem = findings.find((finding) => finding.workItemId === workItemId); if (relatedItem) { setRequestedStatus(null); setSelectedItem(relatedItem); } }} onRecordReview={(status, note) => onRecordReview(selectedItem.reportId, status, note)} onCompleteWork={(details) => onCompleteWork(selectedItem.reportId, details)} onAttachDocument={() => onAttachDocument(selectedItem)} /> : null}
+    {selectedItem ? <FindingReviewDialog key={`${selectedItem.reportId}-${requestedStatus ?? "details"}`} item={selectedItem} findings={findings} calendarProperty={calendarProperty} status={reviewStatuses[selectedItem.reportId] ?? "needs_review"} activities={reviewActivities.filter((activity) => activity.reportId === selectedItem.reportId)} serviceRecords={serviceRecords.filter((record) => record.reportId === selectedItem.reportId)} initialStatus={requestedStatus} guidedPosition={guidedReview ? { current: Math.max(1, inspectionFindingCount - guidedQueue.length + 1), total: inspectionFindingCount } : null} attachmentRevision={attachmentRevision} onSaved={guidedReview ? () => advanceGuidedReview(selectedItem.reportId) : undefined} onClose={() => { setSelectedItem(null); setRequestedStatus(null); }} onOpenRelated={(workItemId) => { const relatedItem = findings.find((finding) => finding.workItemId === workItemId); if (relatedItem) { setRequestedStatus(null); setSelectedItem(relatedItem); } }} onRecordReview={(status, note) => onRecordReview(selectedItem.reportId, status, note)} onCompleteWork={(details) => onCompleteWork(selectedItem.reportId, details)} onUpdateDetails={async (details) => { const updated = await onUpdateDetails(selectedItem.reportId, details); setSelectedItem(updated); }} onAttachDocument={() => onAttachDocument(selectedItem)} /> : null}
     </>
   );
 }
@@ -530,11 +556,17 @@ function ReviewStatusPill({ status }: { status: ReviewStatus }) {
   return <span className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold ${style}`}>{reviewStatusLabels[status]}</span>;
 }
 
-function FindingReviewDialog({ item, findings, calendarProperty, status, activities, serviceRecords, initialStatus, guidedPosition, attachmentRevision, onSaved, onClose, onOpenRelated, onRecordReview, onCompleteWork, onAttachDocument }: { item: Finding; findings: Finding[]; calendarProperty: CalendarProperty; status: ReviewStatus; activities: ReviewActivity[]; serviceRecords: ServiceRecord[]; initialStatus: ReviewStatus | null; guidedPosition: { current: number; total: number } | null; attachmentRevision: number; onSaved?: () => void; onClose: () => void; onOpenRelated: (workItemId: string) => void; onRecordReview: (status: ReviewStatus, note: string) => Promise<void>; onCompleteWork: (details: CompletionDetails) => Promise<unknown>; onAttachDocument: () => void }) {
+function FindingReviewDialog({ item, findings, calendarProperty, status, activities, serviceRecords, initialStatus, guidedPosition, attachmentRevision, onSaved, onClose, onOpenRelated, onRecordReview, onCompleteWork, onUpdateDetails, onAttachDocument }: { item: Finding; findings: Finding[]; calendarProperty: CalendarProperty; status: ReviewStatus; activities: ReviewActivity[]; serviceRecords: ServiceRecord[]; initialStatus: ReviewStatus | null; guidedPosition: { current: number; total: number } | null; attachmentRevision: number; onSaved?: () => void; onClose: () => void; onOpenRelated: (workItemId: string) => void; onRecordReview: (status: ReviewStatus, note: string) => Promise<void>; onCompleteWork: (details: CompletionDetails) => Promise<unknown>; onUpdateDetails: (details: WorkItemDetails) => Promise<void>; onAttachDocument: () => void }) {
   const [pendingStatus, setPendingStatus] = useState<ReviewStatus | null>(initialStatus);
   const [note, setNote] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [isEditingDetails, setIsEditingDetails] = useState(false);
+  const [editTitle, setEditTitle] = useState(item.title);
+  const [editDescription, setEditDescription] = useState(item.suggestedAction);
+  const [editCategory, setEditCategory] = useState(item.category);
+  const [editArea, setEditArea] = useState(item.area);
+  const [detailsError, setDetailsError] = useState("");
   const updateFormRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -585,6 +617,29 @@ function FindingReviewDialog({ item, findings, calendarProperty, status, activit
     }
   };
 
+  const saveDetails = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!editTitle.trim() || !editDescription.trim()) return;
+    setIsSaving(true);
+    setDetailsError("");
+    try {
+      await onUpdateDetails({
+        title: editTitle.trim(),
+        description: editDescription.trim(),
+        category: editCategory,
+        area: editArea,
+      });
+      setIsEditingDetails(false);
+    } catch (error) {
+      setDetailsError(error instanceof Error ? error.message : "The work item details could not be saved.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const detailCategories = [...new Set(findings.map((finding) => finding.category).concat(item.category))].sort();
+  const detailAreas = [...new Set(findings.map((finding) => finding.area).concat(item.area))].sort();
+
   return (
     <div className="fixed inset-0 z-50 grid items-end bg-[#0d1e17]/45 backdrop-blur-sm sm:place-items-center sm:p-6" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
       <section role="dialog" aria-modal="true" aria-labelledby="finding-review-title" className="max-h-[92dvh] w-full overflow-y-auto rounded-t-[28px] bg-[var(--paper)] shadow-2xl sm:max-h-[calc(100dvh-3rem)] sm:max-w-2xl sm:rounded-[28px]">
@@ -598,7 +653,22 @@ function FindingReviewDialog({ item, findings, calendarProperty, status, activit
           <button type="button" onClick={onClose} className="grid size-10 shrink-0 place-items-center rounded-xl bg-black/5 hover:bg-black/10" aria-label="Close review"><X className="size-5"/></button>
         </div>
         <div className="space-y-6 p-5 sm:p-7">
-          <section><p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--muted)]">Inspector recommendation</p><p className="mt-2 text-sm leading-6">{item.suggestedAction}</p></section>
+          <section className="rounded-[22px] border border-black/7 bg-white/65 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--muted)]">{item.isInspectionFinding ? "Inspector recommendation" : "Description"}</p>
+              {!isEditingDetails ? <button type="button" onClick={() => setIsEditingDetails(true)} className="flex min-h-10 items-center gap-1.5 rounded-xl border border-black/8 bg-white px-3 text-xs font-extrabold text-[var(--forest)]"><Pencil className="size-3.5"/> Edit details</button> : null}
+            </div>
+            {isEditingDetails ? (
+              <form onSubmit={saveDetails} className="mt-4 space-y-4">
+                <label className="block"><span className="text-xs font-extrabold">Title</span><input value={editTitle} onChange={(event) => setEditTitle(event.target.value)} maxLength={240} className="mt-2 h-12 w-full rounded-xl border border-black/10 bg-white px-4 text-sm" required /></label>
+                <label className="block"><span className="text-xs font-extrabold">Description</span><textarea value={editDescription} onChange={(event) => setEditDescription(event.target.value)} maxLength={5000} rows={4} className="mt-2 w-full resize-y rounded-xl border border-black/10 bg-white px-4 py-3 text-sm leading-6" required /></label>
+                <div className="grid gap-4 sm:grid-cols-2"><label><span className="text-xs font-extrabold">Category</span><select value={editCategory} onChange={(event) => setEditCategory(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-black/10 bg-white px-3 text-sm">{detailCategories.map((name) => <option key={name}>{name}</option>)}</select></label><label><span className="text-xs font-extrabold">Area</span><select value={editArea} onChange={(event) => setEditArea(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-black/10 bg-white px-3 text-sm">{detailAreas.map((name) => <option key={name}>{name}</option>)}</select></label></div>
+                {item.isInspectionFinding ? <p className="text-xs leading-5 text-[var(--muted)]">The original inspection evidence and page reference will remain unchanged.</p> : null}
+                {detailsError ? <p role="alert" className="rounded-xl bg-[#f8ddd7] px-3 py-2 text-xs font-bold text-[#8c3328]">{detailsError}</p> : null}
+                <div className="grid gap-2 sm:grid-cols-2"><button type="button" onClick={() => { setIsEditingDetails(false); setEditTitle(item.title); setEditDescription(item.suggestedAction); setEditCategory(item.category); setEditArea(item.area); setDetailsError(""); }} className="min-h-11 rounded-xl border border-black/10 bg-white px-4 text-xs font-extrabold">Cancel</button><button type="submit" disabled={!editTitle.trim() || !editDescription.trim() || isSaving} className="min-h-11 rounded-xl bg-[var(--forest)] px-4 text-xs font-extrabold text-white disabled:opacity-40">{isSaving ? "Saving…" : "Save details"}</button></div>
+              </form>
+            ) : <p className="mt-3 whitespace-pre-wrap text-sm leading-6">{item.suggestedAction}</p>}
+          </section>
           <dl className="grid grid-cols-2 gap-3"><Detail label="Area" value={item.area} /><Detail label="Location" value={item.location} icon={MapPin} /><Detail label="Priority" value={item.priority} /><Detail label="Work type" value={item.workType} /></dl>
           {item.targetStartOn ? <CalendarActions item={item} property={calendarProperty} /> : null}
           <InspectionEvidenceCard item={item} />
@@ -883,14 +953,14 @@ function formatTargetWindow(item: Finding) {
   return `${start} – ${formatDateOnly(item.targetEndOn)}`;
 }
 
-function TimelineView({ findings, calendarProperty, reviewStatuses, reviewActivities, serviceRecords, attachmentRevision, onRecordReview, onCompleteWork, onAttachDocument }: { findings: Finding[]; calendarProperty: CalendarProperty; reviewStatuses: Record<string, ReviewStatus>; reviewActivities: ReviewActivity[]; serviceRecords: ServiceRecord[]; attachmentRevision: number; onRecordReview: (reportId: string, status: ReviewStatus, note: string) => Promise<void>; onCompleteWork: (reportId: string, details: CompletionDetails) => Promise<unknown>; onAttachDocument: (item: Finding) => void }) {
+function TimelineView({ findings, calendarProperty, reviewStatuses, reviewActivities, serviceRecords, attachmentRevision, onRecordReview, onCompleteWork, onUpdateDetails, onAttachDocument }: { findings: Finding[]; calendarProperty: CalendarProperty; reviewStatuses: Record<string, ReviewStatus>; reviewActivities: ReviewActivity[]; serviceRecords: ServiceRecord[]; attachmentRevision: number; onRecordReview: (reportId: string, status: ReviewStatus, note: string) => Promise<void>; onCompleteWork: (reportId: string, details: CompletionDetails) => Promise<unknown>; onUpdateDetails: (reportId: string, details: WorkItemDetails) => Promise<Finding>; onAttachDocument: (item: Finding) => void }) {
   const [selectedItem, setSelectedItem] = useState<Finding | null>(null);
   const scheduled = findings.filter((item) => item.targetStartOn).sort((a, b) => (a.targetStartOn ?? "").localeCompare(b.targetStartOn ?? ""));
   const unscheduled = findings.filter((item) => !item.targetStartOn);
   const safety = unscheduled.filter((item) => item.severity === "safety_hazard");
   const important = unscheduled.filter((item) => item.priority === "important" && item.severity !== "safety_hazard");
   const routine = unscheduled.filter((item) => item.priority === "routine" || item.priority === "informational");
-  return <><div className="enter"><PageHeading eyebrow="Plan by time" title="Maintenance timeline" description={scheduled.length ? "Scheduled work appears first. Open any scheduled item to add it to Google Calendar or download an .ics reminder." : "The initial report has no trusted due dates yet, so work is grouped by recommended review horizon."} /><div className="mt-8 max-w-4xl space-y-8">{scheduled.length ? <TimelineGroup label="Scheduled" note="Ready to add to your calendar" color="forest" items={scheduled} reviewStatuses={reviewStatuses} onOpen={setSelectedItem} /> : null}<TimelineGroup label="Verify first" note="Safety findings · review now" color="rose" items={safety} reviewStatuses={reviewStatuses} onOpen={setSelectedItem} /><TimelineGroup label="Plan next" note="Important recommendations · schedule after review" color="amber" items={important.slice(0, 8)} reviewStatuses={reviewStatuses} onOpen={setSelectedItem} /><TimelineGroup label="Routine & long-term" note="Maintenance, monitoring, and cosmetic work" color="forest" items={routine.slice(0, 8)} reviewStatuses={reviewStatuses} onOpen={setSelectedItem} /></div></div>{selectedItem ? <FindingReviewDialog key={selectedItem.workItemId ?? selectedItem.reportId} item={selectedItem} findings={findings} calendarProperty={calendarProperty} status={reviewStatuses[selectedItem.reportId] ?? "needs_review"} activities={reviewActivities.filter((activity) => activity.reportId === selectedItem.reportId)} serviceRecords={serviceRecords.filter((record) => record.reportId === selectedItem.reportId)} initialStatus={null} guidedPosition={null} attachmentRevision={attachmentRevision} onClose={() => setSelectedItem(null)} onOpenRelated={(workItemId) => { const relatedItem = findings.find((finding) => finding.workItemId === workItemId); if (relatedItem) setSelectedItem(relatedItem); }} onRecordReview={(status, note) => onRecordReview(selectedItem.reportId, status, note)} onCompleteWork={(details) => onCompleteWork(selectedItem.reportId, details)} onAttachDocument={() => onAttachDocument(selectedItem)} /> : null}</>;
+  return <><div className="enter"><PageHeading eyebrow="Plan by time" title="Maintenance timeline" description={scheduled.length ? "Scheduled work appears first. Open any scheduled item to add it to Google Calendar or download an .ics reminder." : "The initial report has no trusted due dates yet, so work is grouped by recommended review horizon."} /><div className="mt-8 max-w-4xl space-y-8">{scheduled.length ? <TimelineGroup label="Scheduled" note="Ready to add to your calendar" color="forest" items={scheduled} reviewStatuses={reviewStatuses} onOpen={setSelectedItem} /> : null}<TimelineGroup label="Verify first" note="Safety findings · review now" color="rose" items={safety} reviewStatuses={reviewStatuses} onOpen={setSelectedItem} /><TimelineGroup label="Plan next" note="Important recommendations · schedule after review" color="amber" items={important.slice(0, 8)} reviewStatuses={reviewStatuses} onOpen={setSelectedItem} /><TimelineGroup label="Routine & long-term" note="Maintenance, monitoring, and cosmetic work" color="forest" items={routine.slice(0, 8)} reviewStatuses={reviewStatuses} onOpen={setSelectedItem} /></div></div>{selectedItem ? <FindingReviewDialog key={selectedItem.workItemId ?? selectedItem.reportId} item={selectedItem} findings={findings} calendarProperty={calendarProperty} status={reviewStatuses[selectedItem.reportId] ?? "needs_review"} activities={reviewActivities.filter((activity) => activity.reportId === selectedItem.reportId)} serviceRecords={serviceRecords.filter((record) => record.reportId === selectedItem.reportId)} initialStatus={null} guidedPosition={null} attachmentRevision={attachmentRevision} onClose={() => setSelectedItem(null)} onOpenRelated={(workItemId) => { const relatedItem = findings.find((finding) => finding.workItemId === workItemId); if (relatedItem) setSelectedItem(relatedItem); }} onRecordReview={(status, note) => onRecordReview(selectedItem.reportId, status, note)} onCompleteWork={(details) => onCompleteWork(selectedItem.reportId, details)} onUpdateDetails={async (details) => { const updated = await onUpdateDetails(selectedItem.reportId, details); setSelectedItem(updated); }} onAttachDocument={() => onAttachDocument(selectedItem)} /> : null}</>;
 }
 
 function TimelineGroup({ label, note, color, items, reviewStatuses, onOpen }: { label: string; note: string; color: "rose" | "amber" | "forest"; items: Finding[]; reviewStatuses: Record<string, ReviewStatus>; onOpen: (item: Finding) => void }) {
@@ -909,16 +979,46 @@ function AddWorkDialog({ seed, onClose, onAdd, onUpload }: { seed: InspectionSee
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState(categories[0] ?? "General");
   const [area, setArea] = useState(seed.areas[0] ?? "General");
+  const [step, setStep] = useState<"edit" | "review">("edit");
+  const [discardAction, setDiscardAction] = useState<"close" | "upload" | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const hasDraft = Boolean(title.trim() || description.trim());
 
-  const submit = async (event: React.FormEvent) => {
+  const attemptClose = () => {
+    if (hasDraft && !isSaving) setDiscardAction("close");
+    else onClose();
+  };
+
+  const attemptUpload = () => {
+    if (hasDraft && !isSaving) setDiscardAction("upload");
+    else onUpload();
+  };
+
+  const review = (event: React.FormEvent) => {
     event.preventDefault();
-    if (!title.trim()) return;
+    if (!title.trim() || !description.trim()) return;
+    setSaveError("");
+    setStep("review");
+  };
+
+  const create = async () => {
     setIsSaving(true);
     setSaveError("");
     try {
-      await onAdd({ reportId: `manual-${Date.now()}`, title: title.trim(), category, area, workType: "other", severity: "recommendation", priority: "routine", location: area, suggestedAction: description.trim(), sourcePages: [], isLocal: true });
+      await onAdd({
+        reportId: `manual-${Date.now()}`,
+        title: title.trim(),
+        category,
+        area,
+        workType: "other",
+        severity: "recommendation",
+        priority: "routine",
+        location: area,
+        suggestedAction: description.trim(),
+        sourcePages: [],
+        isLocal: true,
+      });
       onClose();
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : "The work item could not be saved.");
@@ -927,7 +1027,36 @@ function AddWorkDialog({ seed, onClose, onAdd, onUpload }: { seed: InspectionSee
     }
   };
 
-  return <div className="fixed inset-0 z-50 grid items-end bg-[#0d1e17]/45 p-0 backdrop-blur-sm sm:place-items-center sm:p-6" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}><div role="dialog" aria-modal="true" aria-labelledby="add-work-title" className="max-h-[94dvh] w-full overflow-y-auto rounded-t-[28px] bg-[var(--paper)] p-5 shadow-2xl sm:max-w-lg sm:rounded-[28px] sm:p-7"><div className="flex items-start justify-between"><div><p className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-[var(--forest)]">Quick capture</p><h2 id="add-work-title" className="font-display mt-1 text-2xl font-extrabold tracking-tight">Add work</h2></div><button type="button" onClick={onClose} className="grid size-10 place-items-center rounded-xl bg-black/5" aria-label="Close"><X className="size-5"/></button></div><button type="button" onClick={onUpload} className="mt-5 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-[var(--forest)]/20 bg-[var(--mint)]/50 text-sm font-extrabold text-[var(--forest)]"><Upload className="size-[18px]" /> Upload an attachment</button><div className="my-5 flex items-center gap-3 text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--muted)]"><span className="h-px flex-1 bg-black/8" />or add one item<span className="h-px flex-1 bg-black/8" /></div><form onSubmit={submit} className="space-y-4"><label className="block"><span className="text-xs font-extrabold">What needs to be done?</span><input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Service upstairs furnace" className="mt-2 h-12 w-full rounded-xl border border-black/10 bg-white px-4 text-sm"/></label><label className="block"><span className="text-xs font-extrabold">Description <span className="font-normal text-[var(--muted)]">(optional)</span></span><textarea value={description} onChange={(event) => setDescription(event.target.value)} maxLength={5000} rows={3} placeholder="Add useful details, symptoms, or next steps" className="mt-2 w-full resize-y rounded-xl border border-black/10 bg-white px-4 py-3 text-sm leading-6"/></label><div className="grid gap-4 sm:grid-cols-2"><label><span className="text-xs font-extrabold">Category</span><select value={category} onChange={(event) => setCategory(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-black/10 bg-white px-3 text-sm">{categories.map((name) => <option key={name}>{name}</option>)}</select></label><label><span className="text-xs font-extrabold">Area</span><select value={area} onChange={(event) => setArea(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-black/10 bg-white px-3 text-sm">{seed.areas.map((name) => <option key={name}>{name}</option>)}</select></label></div><button type="button" onClick={onUpload} className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-dashed border-black/15 text-sm font-bold text-[var(--muted)]"><Camera className="size-[18px]"/> Add photo or screenshot</button>{saveError ? <p role="alert" className="rounded-xl bg-[#f8ddd7] px-3 py-2 text-xs font-bold text-[#8c3328]">{saveError}</p> : null}<button type="submit" disabled={!title.trim() || isSaving} className="min-h-12 w-full rounded-xl bg-[var(--forest)] text-sm font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-40">{isSaving ? "Saving…" : "Save to work inbox"}</button></form></div></div>;
+  return (
+    <div className="fixed inset-0 z-50 grid items-end bg-[#0d1e17]/45 p-0 backdrop-blur-sm sm:place-items-center sm:p-6" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) attemptClose(); }}>
+      <div role="dialog" aria-modal="true" aria-labelledby="add-work-title" className="max-h-[94dvh] w-full overflow-y-auto rounded-t-[28px] bg-[var(--paper)] p-5 shadow-2xl sm:max-w-lg sm:rounded-[28px] sm:p-7">
+        <div className="flex items-start justify-between"><div><p className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-[var(--forest)]">{step === "edit" ? "Quick capture" : "Check before saving"}</p><h2 id="add-work-title" className="font-display mt-1 text-2xl font-extrabold tracking-tight">{step === "edit" ? "Add work" : "Review work item"}</h2><p className="mt-1 text-xs font-bold text-[var(--muted)]">{seed.property.displayName}</p></div><button type="button" onClick={attemptClose} className="grid size-10 place-items-center rounded-xl bg-black/5" aria-label="Close"><X className="size-5"/></button></div>
+        {step === "edit" ? (
+          <>
+            <button type="button" onClick={attemptUpload} className="mt-5 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-[var(--forest)]/20 bg-[var(--mint)]/50 text-sm font-extrabold text-[var(--forest)]"><Upload className="size-[18px]" /> Upload an attachment</button>
+            <div className="my-5 flex items-center gap-3 text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--muted)]"><span className="h-px flex-1 bg-black/8" />or add one item<span className="h-px flex-1 bg-black/8" /></div>
+            <form onSubmit={review} className="space-y-4">
+              <label className="block"><span className="text-xs font-extrabold">Title</span><input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} maxLength={240} placeholder="e.g. Extend the rear downspouts" className="mt-2 h-12 w-full rounded-xl border border-black/10 bg-white px-4 text-sm" required /></label>
+              <label className="block"><span className="text-xs font-extrabold">Description</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} maxLength={5000} rows={4} placeholder="Describe the issue, what you observed, and what should happen next" className="mt-2 w-full resize-y rounded-xl border border-black/10 bg-white px-4 py-3 text-sm leading-6" required /><span className="mt-1 block text-[10px] font-bold text-[var(--muted)]">Required so the item remains useful after it is saved.</span></label>
+              <div className="grid gap-4 sm:grid-cols-2"><label><span className="text-xs font-extrabold">Category</span><select value={category} onChange={(event) => setCategory(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-black/10 bg-white px-3 text-sm">{categories.map((name) => <option key={name}>{name}</option>)}</select></label><label><span className="text-xs font-extrabold">Area</span><select value={area} onChange={(event) => setArea(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-black/10 bg-white px-3 text-sm">{seed.areas.map((name) => <option key={name}>{name}</option>)}</select></label></div>
+              <button type="button" onClick={attemptUpload} className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-dashed border-black/15 text-sm font-bold text-[var(--muted)]"><Camera className="size-[18px]"/> Add photo or screenshot</button>
+              <button type="submit" disabled={!title.trim() || !description.trim()} className="min-h-12 w-full rounded-xl bg-[var(--forest)] text-sm font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-40">Review work item</button>
+            </form>
+          </>
+        ) : (
+          <div className="mt-5 space-y-4">
+            <div className="rounded-[20px] border border-black/8 bg-white p-4"><p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--muted)]">Title</p><p className="mt-2 text-base font-extrabold">{title.trim()}</p></div>
+            <div className="rounded-[20px] border border-black/8 bg-white p-4"><p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[var(--muted)]">Description</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6">{description.trim()}</p></div>
+            <dl className="grid grid-cols-2 gap-3"><Detail label="Category" value={category}/><Detail label="Area" value={area}/></dl>
+            <p className="text-xs leading-5 text-[var(--muted)]">Nothing has been saved yet. Create the item only after these details look right.</p>
+            {saveError ? <p role="alert" className="rounded-xl bg-[#f8ddd7] px-3 py-2 text-xs font-bold text-[#8c3328]">{saveError}</p> : null}
+            <div className="grid gap-2 sm:grid-cols-2"><button type="button" onClick={() => setStep("edit")} disabled={isSaving} className="min-h-12 rounded-xl border border-black/10 bg-white px-4 text-sm font-extrabold">Back to edit</button><button type="button" onClick={create} disabled={isSaving} className="min-h-12 rounded-xl bg-[var(--forest)] px-4 text-sm font-extrabold text-white disabled:opacity-40">{isSaving ? "Creating…" : "Create work item"}</button></div>
+          </div>
+        )}
+        {discardAction ? <div className="mt-5 rounded-[18px] border border-[#c86a5b]/25 bg-[#f8ddd7] p-4" role="alertdialog" aria-label="Discard unsaved work item?"><p className="text-sm font-extrabold text-[#7b3027]">Discard this unsaved work item?</p><p className="mt-1 text-xs leading-5 text-[#7b3027]">Your title and description will be lost{discardAction === "upload" ? " when you switch to attachment upload" : ""}.</p><div className="mt-3 grid grid-cols-2 gap-2"><button type="button" onClick={() => setDiscardAction(null)} className="min-h-10 rounded-xl border border-black/10 bg-white px-3 text-xs font-extrabold">Keep editing</button><button type="button" onClick={discardAction === "upload" ? onUpload : onClose} className="min-h-10 rounded-xl bg-[#8c3328] px-3 text-xs font-extrabold text-white">{discardAction === "upload" ? "Discard and upload" : "Discard draft"}</button></div></div> : null}
+      </div>
+    </div>
+  );
 }
 
 function PageHeading({ eyebrow, title, description }: { eyebrow: string; title: string; description: string }) {

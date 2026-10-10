@@ -15,7 +15,7 @@ vi.mock("next/headers", () => ({ headers: mocks.headers }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
 
-import { createInitialWorkspaceAction, requestAccountCreationAction } from "./actions";
+import { createInitialWorkspaceAction, createManualWorkItemAction, requestAccountCreationAction } from "./actions";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -61,5 +61,18 @@ describe("account onboarding actions", () => {
     });
     expect(mocks.revalidatePath).toHaveBeenCalledWith("/");
     expect(mocks.redirect).toHaveBeenCalledWith("/?welcome=1");
+  });
+});
+
+describe("manual Work actions", () => {
+  it("rejects an incomplete quick-capture item before touching the database", async () => {
+    await expect(createManualWorkItemAction({
+      propertyId: "22222222-2222-4222-8222-222222222222",
+      title: "Extend rear downspouts",
+      description: "   ",
+      category: "Exterior",
+      area: "Rear exterior",
+    })).rejects.toThrow("Add a description before saving.");
+    expect(mocks.createClient).not.toHaveBeenCalled();
   });
 });
